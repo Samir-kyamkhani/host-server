@@ -4,7 +4,6 @@ import fs from "fs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import mime from "mime-types";
 import Redis from "ioredis";
-import Redis from "ioredis";
 
 const publisher = new Redis("");
 
