@@ -2,6 +2,8 @@ import { ECSClient, RunTaskCommand } from "@aws-sdk/client-ecs";
 import { Server } from "socket.io";
 import Redis from "ioredis";
 import { generateSlug } from "random-word-slugs";
+import { asyncHandler } from "../utils/asyncHandler";
+import { ApiError } from "../utils/ApiError";
 
 const subscriber = new Redis("");
 
@@ -29,8 +31,12 @@ const config = {
   TASK: "",
 };
 
-const createProject = async (req, res) => {
-  const { gitURL, slug } = req.body;
+const createDeployment = asyncHandler(async (req, res) => {
+  const { projectId } = req.body;
+
+  const project = await Prisma.project.findUnique({ where: { id: projectId } })
+
+  if (!project) return ApiError.send(res, 400, "Project not found")
   const projectSlug = slug ? slug : generateSlug();
 
   // Spin the container
@@ -65,7 +71,7 @@ const createProject = async (req, res) => {
     status: "queued",
     data: { projectSlug, url: `http://${projectSlug}.localhost:8000` },
   });
-};
+});
 
 async function initRedisSubscribe() {
   console.log("Subscribed to logs....");
@@ -77,4 +83,4 @@ async function initRedisSubscribe() {
 
 initRedisSubscribe();
 
-export { createProject };
+export { createDeployment };
