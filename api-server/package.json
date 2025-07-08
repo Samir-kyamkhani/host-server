@@ -12,16 +12,21 @@
   },
   "dependencies": {
     "@aws-sdk/client-ecs": "^3.840.0",
+    "@clickhouse/client": "^1.11.2",
     "@prisma/client": "^6.11.1",
     "bcrypt": "^6.0.0",
+    "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.0.1",
     "express": "^5.1.0",
-    "ioredis": "^5.6.1",
+    "i": "^0.3.7",
     "jsonwebtoken": "^9.0.2",
+    "kafkajs": "^2.2.4",
+    "npm": "^11.4.2",
     "random-word-slugs": "^0.1.7",
-    "socket.io": "^4.8.1"
+    "socket.io": "^4.8.1",
+    "uuid": "^11.1.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10",

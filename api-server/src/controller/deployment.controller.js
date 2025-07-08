@@ -1,25 +1,10 @@
 import { ECSClient, RunTaskCommand } from "@aws-sdk/client-ecs";
-import { Server } from "socket.io";
-import Redis from "ioredis";
-import { generateSlug } from "random-word-slugs";
-import { asyncHandler } from "../utils/asyncHandler";
-import { ApiError } from "../utils/ApiError";
-
-const subscriber = new Redis("");
-
-const io = new Server({ cors: "*" });
-
-io.on("connection", (socket) => {
-  socket.on("subscribe", (channel) => {
-    socket.join(channel);
-    socket.emit("message", `Joined ${channel}`);
-  });
-});
-
-io.listen(9002, () => console.log("Socket Server 9002"));
+import { asyncHandler } from "../utils/asyncHandler.js";
+import { ApiError } from "../utils/ApiError.js";
+import Prisma from "../db/db.js";
 
 const ecsClient = new ECSClient({
-  region: "ap-south-1",
+  region: process.env.AWS_REGION,
   credentials: {
     accessKeyId: process.env.S3CLIENT_ACCESSKEYID,
     secretAccessKey: process.env.S3CLIENT_SECRETACCESSKEY,
@@ -27,19 +12,33 @@ const ecsClient = new ECSClient({
 });
 
 const config = {
-  CLUSTER: "",
-  TASK: "",
+  CLUSTER: process.env.ECS_CLUSTER,
+  TASK: process.env.ECS_TASK,
+  SUBNETS: process.env.ECS_SUBNETS?.split(",") || [],
+  SECURITY_GROUPS: process.env.ECS_SECURITY_GROUPS?.split(",") || [],
 };
 
 const createDeployment = asyncHandler(async (req, res) => {
   const { projectId } = req.body;
 
-  const project = await Prisma.project.findUnique({ where: { id: projectId } })
+  if (!projectId) return ApiError.send(res, 400, "Missing projectId");
 
-  if (!project) return ApiError.send(res, 400, "Project not found")
-  const projectSlug = slug ? slug : generateSlug();
+  const project = await Prisma.project.findUnique({ where: { id: projectId } });
+  if (!project) return ApiError.send(res, 404, "Project not found");
 
-  // Spin the container
+  const existing = await Prisma.deployement.findFirst({
+    where: { projectId, status: "IN_PROGRESS" },
+  });
+
+  if (existing) return ApiError.send(res, 409, "Deployment already running");
+
+  const deployment = await Prisma.deployment.create({
+    data: {
+      projectId,
+      status: "QUEUED",
+    },
+  });
+
   const command = new RunTaskCommand({
     cluster: config.CLUSTER,
     taskDefinition: config.TASK,
@@ -48,8 +47,8 @@ const createDeployment = asyncHandler(async (req, res) => {
     networkConfiguration: {
       awsvpcConfiguration: {
         assignPublicIp: "ENABLED",
-        subnets: ["", "", ""],
-        securityGroups: [""],
+        subnets: config.SUBNETS,
+        securityGroups: config.SECURITY_GROUPS,
       },
     },
     overrides: {
@@ -57,8 +56,9 @@ const createDeployment = asyncHandler(async (req, res) => {
         {
           name: "builder-image",
           environment: [
-            { name: "GIT_REPOSITORY__URL", value: gitURL },
-            { name: "PROJECT_ID", value: projectSlug },
+            { name: "GIT_REPOSITORY__URL", value: project.gitURL },
+            { name: "PROJECT_ID", value: projectId },
+            { name: "DEPLOYMENT_ID", value: deployment.id },
           ],
         },
       ],
@@ -67,20 +67,9 @@ const createDeployment = asyncHandler(async (req, res) => {
 
   await ecsClient.send(command);
 
-  return res.json({
-    status: "queued",
-    data: { projectSlug, url: `http://${projectSlug}.localhost:8000` },
-  });
+  return res
+    .status(201)
+    .json(new ApiResponse(201, "Deployment started", deployment));
 });
-
-async function initRedisSubscribe() {
-  console.log("Subscribed to logs....");
-  subscriber.psubscribe("logs:*");
-  subscriber.on("pmessage", (pattern, channel, message) => {
-    io.to(channel).emit("message", message);
-  });
-}
-
-initRedisSubscribe();
 
 export { createDeployment };

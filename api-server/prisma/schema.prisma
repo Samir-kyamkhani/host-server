@@ -7,43 +7,100 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum DeployementStatus {
-  Not_STARTED
+enum DeploymentStatus {
+  NOT_STARTED
+  QUEUED
   IN_PROGRESS
   READY
   FAILED
-  QUEUED
+}
+
+enum DomainStatus {
+  PENDING
+  VERIFIED
+  FAILED
+  BLOCKED
+}
+
+enum DomainType {
+  A
+  CNAME
+}
+
+enum PlanType {
+  FREE
+  STARTER
+  PRO
 }
 
 model User {
-  id        String    @id @default(uuid())
-  firstName String    @map("first_name")
-  lastName  String    @map("last_name")
-  email     String    @unique
-  password  String
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  Project   Project[]
+  id           String        @id @default(uuid())
+  firstName    String
+  lastName     String
+  email        String        @unique
+  password     String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  projects     Project[]
+  subscription Subscription?
+}
+
+model Subscription {
+  id               String    @id @default(uuid())
+  userId           String    @unique
+  razorpayId       String    @unique
+  plan             PlanType  @default(FREE)
+  status           String // active, cancelled, etc.
+  currentPeriodEnd DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id])
 }
 
 model Project {
-  id           String        @id @default(uuid())
-  name         String
-  gitUrl       String        @map("git_url")
-  subdomain    String
-  customDomain String?       @map("custom_domain")
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  User         User          @relation(fields: [userId], references: [id])
-  userId       String
-  Deployement  Deployement[]
+  id        String   @id @default(uuid())
+  name      String
+  gitUrl    String   @unique @map("git_url")
+  subdomain String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId        String
+  user          User           @relation(fields: [userId], references: [id])
+  deployments   Deployment[]
+  customDomains CustomDomain[]
+  domainLogs    DomainLog[]
 }
 
-model Deployement {
-  id        String            @id @default(uuid())
-  projectId String            @map("project_id")
-  status    DeployementStatus @default(Not_STARTED)
-  Project   Project           @relation(fields: [projectId], references: [id])
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+model Deployment {
+  id        String           @id @default(uuid())
+  projectId String           @map("project_id")
+  status    DeploymentStatus @default(NOT_STARTED)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @default(now())
+
+  project Project @relation(fields: [projectId], references: [id])
+}
+
+model CustomDomain {
+  id                String       @id @default(uuid())
+  domain            String       @unique // e.g. www.example.com
+  type              DomainType
+  status            DomainStatus @default(PENDING)
+  verificationToken String // DNS TXT token
+  verifiedAt        DateTime?
+  isPrimary         Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
+}
+
+model DomainLog {
+  id        String   @id @default(uuid())
+  message   String
+  createdAt DateTime @default(now())
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id])
 }

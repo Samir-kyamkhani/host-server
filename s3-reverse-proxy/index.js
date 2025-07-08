@@ -1,28 +1,60 @@
+// s3-reverse-proxy/index.js
 import express from "express";
 import httpProxy from "http-proxy";
+import url from "url";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-const PORT = 8000;
-
-const BASE_PATH =
-  "https://vercel-clone-outputs.s3.ap-south-1.amazonaws.com/__outputs";
+const PORT = process.env.PROXY_PORT || 8000;
+const BASE_PATH = process.env.S3_BASE_URL;
+const API_BASE_URL = process.env.API_BASE_URL;
 
 const proxy = httpProxy.createProxy();
 
-app.use((req, res) => {
-  const hostname = req.hostname;
-  const subdomain = hostname.split(".")[0];
+app.use(async (req, res) => {
+  try {
+    const hostname = req.hostname;
 
-  // Custom Domain - DB Query
+    const response = await fetch(
+      `${API_BASE_URL}/api/projects/resolve?domain=${hostname}`
+    );
+    const result = await response.json();
 
-  const resolvesTo = `${BASE_PATH}/${subdomain}`;
+    if (!result?.data?.subdomain) {
+      return res.status(404).send("Project not found");
+    }
 
-  return proxy.web(req, res, { target: resolvesTo, changeOrigin: true });
+    const subdomain = result.data.subdomain;
+
+    const parsedUrl = url.parse(req.url);
+    let path = parsedUrl.pathname;
+    if (path === "/" || path.endsWith("/")) path += "index.html";
+
+    const finalTarget = `${BASE_PATH}/${subdomain}${path}`;
+
+    console.log(`[Proxy] ${hostname} → ${finalTarget}`);
+
+    proxy.web(req, res, {
+      target: finalTarget,
+      changeOrigin: true,
+      ignorePath: true,
+      headers: {
+        host: new URL(finalTarget).host,
+      },
+    });
+  } catch (err) {
+    console.error("Proxy error:", err);
+    res.status(500).send("Internal Reverse Proxy Error");
+  }
 });
 
-proxy.on("proxyReq", (proxyReq, req, res) => {
-  const url = req.url;
-  if (url === "/") proxyReq.path += "index.html";
+proxy.on("error", (err, req, res) => {
+  res.writeHead(502, { "Content-Type": "text/plain" });
+  res.end("Bad Gateway");
 });
 
-app.listen(PORT, () => console.log(`Reverse Proxy Running..${PORT}`));
+app.listen(PORT, () => {
+  console.log(`✅ Reverse Proxy running on http://localhost:${PORT}`);
+});

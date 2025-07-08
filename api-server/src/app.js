@@ -16,10 +16,14 @@ app.use(express.json({ limit: data }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 app.use(cookieParser());
 
+import projectRoutes from "./routes/projects.routes.js";
+import deploymentRoutes from "./routes/deployment.routes.js";
+import authRoutes from "./routes/auth.routes.js";
+import domainRoutes from "./routes/domain.routes.js";
 
-import projectRouter from "./routes/projects.routes.js";
-
-// routes declaration
-app.use("/api/v1/projects", projectRouter);
+app.use("/api/v1/projects", projectRoutes);
+app.use("/api/v1/deployments", deploymentRoutes);
+app.use("/api/v1",authRoutes);
+app.use("/api/v1/domain", domainRoutes);
 
 export default app;
