@@ -46,7 +46,7 @@ const createProject = asyncHandler(async (req, res) => {
     .json(new ApiResponse(201, "✅ Project created successfully", project));
 });
 
-export const resolveDomain = asyncHandler(async (req, res) => {
+const resolveDomain = asyncHandler(async (req, res) => {
   const { domain } = req.query;
   if (!domain) return ApiError.send(res, 400, "Missing domain");
 
@@ -75,4 +75,18 @@ const getProjects = asyncHandler(async (req, res) => {
   return res.json(new ApiResponse(200, "Projects", projects));
 });
 
-export { createProject, getProjects };
+const updateProject = asyncHandler(async (req, res) => {
+  const { name, gitURL } = req.body;
+
+  const updated = await Prisma.project.update({
+    where: { id: req.params.id },
+    data: {
+      name,
+      gitURL,
+    },
+  });
+
+  return res.json(new ApiResponse(200, "Project updated", updated));
+});
+
+export { createProject, getProjects, resolveDomain, updateProject };
