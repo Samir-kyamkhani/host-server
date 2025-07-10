@@ -11,7 +11,7 @@ import {
 } from "../utils/utils.js";
 
 const cookieOptions = {
-  httpOnly: true,
+  httpOnly: false,
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax",
 };
