@@ -35,10 +35,12 @@ enum PlanType {
 
 model User {
   id           String        @id @default(uuid())
-  firstName    String
-  lastName     String
+  fullName     String
+  username     String        @unique
   email        String        @unique
   password     String
+  provider     String? // e.g. "github", "email"
+  providerId   String? // e.g. GitHub user ID
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   projects     Project[]

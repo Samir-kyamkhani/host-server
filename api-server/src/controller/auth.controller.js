@@ -1,31 +1,97 @@
 import { z } from "zod";
 import Prisma from "../db/db.js";
+import axios from "axios";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import { comparePassword, hashPassword } from "../utils/utils.js";
+import { comparePassword, hashPassword, generateAccessToken } from "../utils/utils.js";
 
+// Register (email or GitHub)
 const registerUser = asyncHandler(async (req, res) => {
+  const { code } = req.body;
+
+  if (code) {
+    // GitHub Signup Flow
+    const tokenRes = await axios.post(
+      "https://github.com/login/oauth/access_token",
+      {
+        client_id: process.env.GITHUB_CLIENT_ID,
+        client_secret: process.env.GITHUB_CLIENT_SECRET,
+        code,
+      },
+      { headers: { Accept: "application/json" } }
+    );
+
+    const accessToken = tokenRes.data.access_token;
+    if (!accessToken) throw new ApiError.send(res, 401, "Invalid GitHub code");
+
+    const { data: githubUser } = await axios.get("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    let email = githubUser.email;
+
+    if (!email) {
+      const { data: emails } = await axios.get("https://api.github.com/user/emails", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      email = emails.find((e) => e.primary)?.email;
+    }
+
+    if (!email) throw new ApiError.send(res, 400, "GitHub email not available");
+
+    let user = await Prisma.user.findUnique({ where: { email } });
+
+    if (!user) {
+      const fullName = githubUser.name || email.split("@")[0];
+      const username = fullName.toLowerCase().replace(/\s+/g, "_");
+
+      user = await Prisma.user.create({
+        data: {
+          fullName,
+          username,
+          email,
+          password: "oauth",
+          provider: "github",
+          providerId: githubUser.id.toString(),
+        },
+      });
+    }
+
+    const token = generateAccessToken(user.id, user.email);
+    return res.status(200).json(new ApiResponse(200, "GitHub signup successful", { token }));
+  }
+
+  // Email Signup Flow
   const schema = z.object({
-    firstName: z.string(),
-    lastName: z.string(),
+    fullName: z.string().min(2, "Full name is required"),
     email: z.string().email(),
     password: z.string().min(6),
   });
 
-  const { firstName, lastName, email, password } = schema.parse(req.body);
+  const { fullName, email, password } = schema.parse(req.body);
 
   const existing = await Prisma.user.findUnique({ where: { email } });
   if (existing) throw new ApiError.send(res, 409, "User already exists");
 
   const hashed = await hashPassword(password);
+  const username = fullName.toLowerCase().replace(/\s+/g, "_");
+
   const user = await Prisma.user.create({
-    data: { firstName, lastName, email, password: hashed },
+    data: {
+      fullName,
+      username,
+      email,
+      password: hashed,
+      provider: "email",
+    },
   });
 
-  return res.status(201).json(new ApiResponse(201, "User created", user));
+  const token = generateAccessToken(user.id, user.email);
+  return res.status(201).json(new ApiResponse(201, "User created", { token }));
 });
 
+// Login
 const loginUser = asyncHandler(async (req, res) => {
   const schema = z.object({
     email: z.string().email(),
@@ -36,11 +102,14 @@ const loginUser = asyncHandler(async (req, res) => {
   const user = await Prisma.user.findUnique({ where: { email } });
   if (!user) throw new ApiError.send(res, 401, "Invalid credentials");
 
+  if (user.password === "oauth") {
+    throw new ApiError.send(res, 400, "Please login with GitHub");
+  }
+
   const match = await comparePassword(password, user.password);
   if (!match) throw new ApiError.send(res, 401, "Invalid credentials");
 
   const token = generateAccessToken(user.id, user.email);
-
   return res.json(new ApiResponse(200, "Login successful", { token }));
 });
 
