@@ -4,7 +4,17 @@ import axios from "axios";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import { comparePassword, hashPassword, generateAccessToken } from "../utils/utils.js";
+import {
+  comparePassword,
+  hashPassword,
+  generateAccessToken,
+} from "../utils/utils.js";
+
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax",
+};
 
 const registerUser = asyncHandler(async (req, res) => {
   const { code } = req.body;
@@ -23,19 +33,30 @@ const registerUser = asyncHandler(async (req, res) => {
     const accessToken = tokenRes.data.access_token;
     if (!accessToken) return ApiError.send(res, 401, "Invalid GitHub code");
 
-    const { data: githubUser } = await axios.get("https://api.github.com/user", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const { data: githubUser } = await axios.get(
+      "https://api.github.com/user",
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
 
     let email = githubUser.email;
 
     if (!email) {
-      const { data: emails } = await axios.get("https://api.github.com/user/emails", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const { data: emails } = await axios.get(
+        "https://api.github.com/user/emails",
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
 
       const primaryEmailObj = emails.find((e) => e.primary && e.verified);
-      if (!primaryEmailObj) return ApiError.send(res, 400, "GitHub email not available or not verified");
+      if (!primaryEmailObj)
+        return ApiError.send(
+          res,
+          400,
+          "GitHub email not available or not verified"
+        );
 
       email = primaryEmailObj.email;
     }
@@ -75,7 +96,10 @@ const registerUser = asyncHandler(async (req, res) => {
     }
 
     const token = generateAccessToken(user.id, user.email);
-    return res.status(200).json(new ApiResponse(200, "GitHub signup successful", { token }));
+    return res
+      .status(200)
+      .cookie("accessToken", token, cookieOptions)
+      .json(new ApiResponse(200, "GitHub signup successful", { token }));
   }
 
   const schema = z.object({
@@ -112,7 +136,6 @@ const registerUser = asyncHandler(async (req, res) => {
   return res.status(201).json(new ApiResponse(201, "User created", { token }));
 });
 
-
 const loginUser = asyncHandler(async (req, res) => {
   const schema = z.object({
     email: z.string().email(),
@@ -132,8 +155,10 @@ const loginUser = asyncHandler(async (req, res) => {
   if (!match) return ApiError.send(res, 401, "Invalid credentials");
 
   const token = generateAccessToken(user.id, user.email);
-  return res.status(200).json(new ApiResponse(200, "Login successful", { token }));
+  return res
+    .status(200)
+    .cookie("accessToken", token, cookieOptions)
+    .json(new ApiResponse(200, "Login successful", { token }));
 });
-
 
 export { registerUser, loginUser };
