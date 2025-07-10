@@ -6,12 +6,10 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { comparePassword, hashPassword, generateAccessToken } from "../utils/utils.js";
 
-// Register (email or GitHub)
 const registerUser = asyncHandler(async (req, res) => {
   const { code } = req.body;
 
   if (code) {
-    // GitHub Signup Flow
     const tokenRes = await axios.post(
       "https://github.com/login/oauth/access_token",
       {
@@ -23,7 +21,7 @@ const registerUser = asyncHandler(async (req, res) => {
     );
 
     const accessToken = tokenRes.data.access_token;
-    if (!accessToken) throw new ApiError.send(res, 401, "Invalid GitHub code");
+    if (!accessToken) return ApiError.send(res, 401, "Invalid GitHub code");
 
     const { data: githubUser } = await axios.get("https://api.github.com/user", {
       headers: { Authorization: `Bearer ${accessToken}` },
@@ -35,23 +33,41 @@ const registerUser = asyncHandler(async (req, res) => {
       const { data: emails } = await axios.get("https://api.github.com/user/emails", {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
-      email = emails.find((e) => e.primary)?.email;
+
+      const primaryEmailObj = emails.find((e) => e.primary && e.verified);
+      if (!primaryEmailObj) return ApiError.send(res, 400, "GitHub email not available or not verified");
+
+      email = primaryEmailObj.email;
     }
 
-    if (!email) throw new ApiError.send(res, 400, "GitHub email not available");
+    let user = await Prisma.user.findFirst({
+      where: {
+        provider: "github",
+        providerId: githubUser.id.toString(),
+      },
+    });
 
-    let user = await Prisma.user.findUnique({ where: { email } });
+    if (!user) {
+      user = await Prisma.user.findUnique({ where: { email } });
+    }
 
     if (!user) {
       const fullName = githubUser.name || email.split("@")[0];
-      const username = fullName.toLowerCase().replace(/\s+/g, "_");
+
+      // Generate a unique username
+      let baseUsername = fullName.toLowerCase().replace(/\s+/g, "_");
+      let username = baseUsername;
+      let counter = 1;
+      while (await Prisma.user.findUnique({ where: { username } })) {
+        username = `${baseUsername}${counter++}`;
+      }
 
       user = await Prisma.user.create({
         data: {
           fullName,
           username,
           email,
-          password: "oauth",
+          password: null, // explicitly null for OAuth users
           provider: "github",
           providerId: githubUser.id.toString(),
         },
@@ -62,7 +78,6 @@ const registerUser = asyncHandler(async (req, res) => {
     return res.status(200).json(new ApiResponse(200, "GitHub signup successful", { token }));
   }
 
-  // Email Signup Flow
   const schema = z.object({
     fullName: z.string().min(2, "Full name is required"),
     email: z.string().email(),
@@ -72,10 +87,16 @@ const registerUser = asyncHandler(async (req, res) => {
   const { fullName, email, password } = schema.parse(req.body);
 
   const existing = await Prisma.user.findUnique({ where: { email } });
-  if (existing) throw new ApiError.send(res, 409, "User already exists");
+  if (existing) return ApiError.send(res, 409, "User already exists");
 
   const hashed = await hashPassword(password);
-  const username = fullName.toLowerCase().replace(/\s+/g, "_");
+
+  let baseUsername = fullName.toLowerCase().replace(/\s+/g, "_");
+  let username = baseUsername;
+  let counter = 1;
+  while (await Prisma.user.findUnique({ where: { username } })) {
+    username = `${baseUsername}${counter++}`;
+  }
 
   const user = await Prisma.user.create({
     data: {
@@ -91,26 +112,28 @@ const registerUser = asyncHandler(async (req, res) => {
   return res.status(201).json(new ApiResponse(201, "User created", { token }));
 });
 
-// Login
+
 const loginUser = asyncHandler(async (req, res) => {
   const schema = z.object({
     email: z.string().email(),
     password: z.string().min(6),
   });
+
   const { email, password } = schema.parse(req.body);
 
   const user = await Prisma.user.findUnique({ where: { email } });
-  if (!user) throw new ApiError.send(res, 401, "Invalid credentials");
+  if (!user) return ApiError.send(res, 401, "Invalid credentials");
 
-  if (user.password === "oauth") {
-    throw new ApiError.send(res, 400, "Please login with GitHub");
+  if (!user.password) {
+    return ApiError.send(res, 400, "Please login with GitHub");
   }
 
   const match = await comparePassword(password, user.password);
-  if (!match) throw new ApiError.send(res, 401, "Invalid credentials");
+  if (!match) return ApiError.send(res, 401, "Invalid credentials");
 
   const token = generateAccessToken(user.id, user.email);
-  return res.json(new ApiResponse(200, "Login successful", { token }));
+  return res.status(200).json(new ApiResponse(200, "Login successful", { token }));
 });
+
 
 export { registerUser, loginUser };
