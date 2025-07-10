@@ -13,8 +13,8 @@ import {
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "Lax",         //  Prevent CSRF
-  path: "/",               //  Available across routes
+  sameSite: "Lax", //  Prevent CSRF
+  path: "/", //  Available across routes
   maxAge: 1000 * 60 * 60 * 24 * 7, // Optional: 7 days
 };
 
@@ -160,7 +160,30 @@ const loginUser = asyncHandler(async (req, res) => {
   return res
     .status(200)
     .cookie("accessToken", token, cookieOptions)
-    .json(new ApiResponse(200, "Login successful", { token }));
+    .json(new ApiResponse(200, "Login successful"));
 });
 
-export { registerUser, loginUser };
+const getCurrentUser = asyncHandler(async (req, res) => {
+  if (!req.user || !req.user.id) {
+    return ApiError.send(res, 401, "Unauthorized");
+  }
+
+  const dbUser = await Prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+    },
+  });
+
+  if (!dbUser) {
+    return ApiError.send(res, 404, "User not found");
+  }
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Current user fatched.", dbUser));
+});
+
+export { registerUser, loginUser, getCurrentUser };

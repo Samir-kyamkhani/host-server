@@ -1,4 +1,3 @@
-// s3-reverse-proxy/index.js
 import express from "express";
 import httpProxy from "http-proxy";
 import url from "url";
