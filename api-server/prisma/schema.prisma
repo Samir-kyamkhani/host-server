@@ -25,6 +25,7 @@ enum DomainStatus {
 enum DomainType {
   A
   CNAME
+  TXT
 }
 
 enum PlanType {
@@ -34,15 +35,16 @@ enum PlanType {
 }
 
 model User {
-  id           String        @id @default(uuid())
-  fullName     String
-  username     String        @unique
-  email        String        @unique
-  password     String
-  provider     String? // e.g. "github", "email"
-  providerId   String? // e.g. GitHub user ID
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id         String   @id @default(uuid())
+  fullName   String
+  username   String   @unique
+  email      String   @unique
+  password   String
+  provider   String? // e.g. "github", "email"
+  providerId String? // GitHub or Google ID
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
   projects     Project[]
   subscription Subscription?
 }
@@ -87,12 +89,13 @@ model Deployment {
 model CustomDomain {
   id                String       @id @default(uuid())
   domain            String       @unique // e.g. www.example.com
-  type              DomainType
+  type              DomainType   @default(A) // CNAME or A record
   status            DomainStatus @default(PENDING)
-  verificationToken String // DNS TXT token
+  verificationToken String // DNS TXT record
   verifiedAt        DateTime?
   isPrimary         Boolean      @default(false)
   createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   projectId String
   project   Project @relation(fields: [projectId], references: [id])
