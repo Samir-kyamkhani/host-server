@@ -26,7 +26,7 @@ const createDeployment = asyncHandler(async (req, res) => {
   const project = await Prisma.project.findUnique({ where: { id: projectId } });
   if (!project) return ApiError.send(res, 404, "Project not found");
 
-  const existing = await Prisma.deployement.findFirst({
+  const existing = await Prisma.deployment.findFirst({
     where: { projectId, status: "IN_PROGRESS" },
   });
 
@@ -56,7 +56,7 @@ const createDeployment = asyncHandler(async (req, res) => {
         {
           name: "builder-image",
           environment: [
-            { name: "GIT_REPOSITORY__URL", value: project.gitURL },
+            { name: "GIT_REPOSITORY__URL", value: project.gitUrl },
             { name: "PROJECT_ID", value: projectId },
             { name: "DEPLOYMENT_ID", value: deployment.id },
           ],
