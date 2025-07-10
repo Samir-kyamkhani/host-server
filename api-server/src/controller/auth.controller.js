@@ -11,9 +11,11 @@ import {
 } from "../utils/utils.js";
 
 const cookieOptions = {
-  httpOnly: false,
+  httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "lax",
+  sameSite: "Lax",         //  Prevent CSRF
+  path: "/",               //  Available across routes
+  maxAge: 1000 * 60 * 60 * 24 * 7, // Optional: 7 days
 };
 
 const registerUser = asyncHandler(async (req, res) => {
@@ -115,7 +117,7 @@ const registerUser = asyncHandler(async (req, res) => {
 
   const hashed = await hashPassword(password);
 
-  let baseUsername = fullName.toLowerCase().replace(/\s+/g, "_");
+  let baseUsername = email.split("@")[0].toLowerCase();
   let username = baseUsername;
   let counter = 1;
   while (await Prisma.user.findUnique({ where: { username } })) {
