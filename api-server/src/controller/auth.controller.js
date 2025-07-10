@@ -173,7 +173,7 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     select: {
       id: true,
       email: true,
-      name: true,
+      fullName: true,
     },
   });
 
