@@ -3,7 +3,6 @@ import path from "path";
 import fs from "fs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import mime from "mime-types";
-import { Kafka } from "kafkajs";
 
 const s3Client = new S3Client({
   region: process.env.S3_REGION,
@@ -16,28 +15,8 @@ const s3Client = new S3Client({
 const PROJECT_ID = process.env.PROJECT_ID;
 const DEPLOYMENT_ID = process.env.DEPLOYMENT_ID;
 
-const kafka = new Kafka({
-  clientId: `docker-build-server-${PROJECT_ID}`,
-  brokers: [process.env.KAFKA_BROKER],
-  ssl: {
-    ca: [fs.readFileSync(path.join(__dirname, "kafka.pem"), "utf-8")],
-  },
-  sasl: {
-    username: process.env.KAFKA_USERNAME,
-    password: process.env.KAFKA_PASSWORD,
-    mechanism: "plain",
-  },
-});
-
-const producer = kafka.producer();
-
 async function publishLog(log) {
-  await producer.send({
-    topic: `container-logs`,
-    messages: [
-      { key: `log`, value: JSON.stringify({ PROJECT_ID, DEPLOYMENT_ID, log }) },
-    ],
-  });
+  console.log(`[${PROJECT_ID}/${DEPLOYMENT_ID}] ${log}`);
 }
 
 function runCommand(command, cwd) {
@@ -45,12 +24,10 @@ function runCommand(command, cwd) {
     const proc = exec(command, { cwd });
 
     proc.stdout.on("data", async (data) => {
-      console.log(data.toString());
       await publishLog(data.toString());
     });
 
     proc.stderr.on("data", async (data) => {
-      console.error(data.toString());
       await publishLog(`[stderr] ${data.toString()}`);
     });
 
@@ -94,12 +71,10 @@ async function startNodeServer(outDirPath, startCmd, port) {
   const proc = exec(startCmd, { cwd: outDirPath });
 
   proc.stdout.on("data", async (data) => {
-    console.log(data.toString());
     await publishLog(data.toString());
   });
 
   proc.stderr.on("data", async (data) => {
-    console.error(data.toString());
     await publishLog(`[stderr] ${data.toString()}`);
   });
 
@@ -139,14 +114,15 @@ async function uploadToS3(folderPath) {
     });
 
     await s3Client.send(command);
-    await publishLog(`✅ Uploaded: ${relativePath} (${fs.statSync(filePath).size} bytes)`);
+    await publishLog(
+      `✅ Uploaded: ${relativePath} (${fs.statSync(filePath).size} bytes)`
+    );
   }
 
   await publishLog("🎉 Upload complete");
 }
 
 async function init() {
-  await producer.connect();
   await publishLog("🚀 Build Started...");
 
   const outDirPath = path.join(__dirname, "output");
@@ -175,7 +151,8 @@ async function init() {
         buildCmd = "npm install && npm run build";
         break;
       case "laravel":
-        buildCmd = "composer install && php artisan config:cache && php artisan route:cache";
+        buildCmd =
+          "composer install && php artisan config:cache && php artisan route:cache";
         break;
       default:
         buildCmd = "echo 'No build needed'";
