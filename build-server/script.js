@@ -108,7 +108,7 @@ async function uploadToS3(folderPath) {
 
     const command = new PutObjectCommand({
       Bucket: "host-server-bucket",
-      Key: `__outputs/${PROJECT_ID}/${relativePath}`,
+      Key: `__outputs/${PROJECT_ID}/${DEPLOYMENT_ID}/${relativePath}`,
       Body: fileStream,
       ContentType: contentType,
     });
