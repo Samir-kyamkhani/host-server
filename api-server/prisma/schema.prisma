@@ -54,11 +54,11 @@ model Subscription {
   userId           String    @unique
   razorpayId       String    @unique
   plan             PlanType  @default(FREE)
-  status           String // active, cancelled, etc.
+  status           String
   currentPeriodEnd DateTime?
   createdAt        DateTime  @default(now())
 
-  user User @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Project {
@@ -69,8 +69,9 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userId        String
-  user          User           @relation(fields: [userId], references: [id])
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
   deployments   Deployment[]
   customDomains CustomDomain[]
   domainLogs    DomainLog[]
@@ -83,7 +84,7 @@ model Deployment {
   createdAt DateTime         @default(now())
   updatedAt DateTime         @default(now())
 
-  project       Project         @relation(fields: [projectId], references: [id])
+  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   DeploymentLog DeploymentLog[]
 }
 
@@ -93,22 +94,22 @@ model DeploymentLog {
   log          String
   createdAt    DateTime @default(now())
 
-  deployment Deployment @relation(fields: [deploymentId], references: [id])
+  deployment Deployment @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
 }
 
 model CustomDomain {
   id                String       @id @default(uuid())
-  domain            String       @unique // e.g. www.example.com
-  type              DomainType   @default(A) // CNAME or A record
+  domain            String       @unique
+  type              DomainType   @default(A)
   status            DomainStatus @default(PENDING)
-  verificationToken String // DNS TXT record
+  verificationToken String
   verifiedAt        DateTime?
   isPrimary         Boolean      @default(false)
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
 
   projectId String
-  project   Project @relation(fields: [projectId], references: [id])
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
 
 model DomainLog {
@@ -117,5 +118,5 @@ model DomainLog {
   createdAt DateTime @default(now())
 
   projectId String
-  project   Project @relation(fields: [projectId], references: [id])
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
