@@ -3,6 +3,7 @@ import {
   createDeployment,
   deleteDeployment,
   getAllDeployments,
+  getDeploymentById,
   updateDeployment,
 } from "../controller/deployment.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";

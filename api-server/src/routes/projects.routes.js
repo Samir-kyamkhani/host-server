@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   createProject,
+  deleteProject,
   getProjectById,
   getProjects,
   resolveDomain,
