@@ -75,10 +75,10 @@ const registerUser = asyncHandler(async (req, res) => {
     }
 
     if (!user) {
-      const fullName = githubUser.name || email.split("@")[0];
+      const fullName = email.split("@")[0];
 
       // Generate a unique username
-      let baseUsername = fullName.toLowerCase().replace(/\s+/g, "_");
+      let baseUsername = email.split("@")[0];
       let username = baseUsername;
       let counter = 1;
       while (await Prisma.user.findUnique({ where: { username } })) {
@@ -90,7 +90,7 @@ const registerUser = asyncHandler(async (req, res) => {
           fullName,
           username,
           email,
-          password: null, // explicitly null for OAuth users
+          password: "",
           provider: "github",
           providerId: githubUser.id.toString(),
         },
@@ -124,7 +124,7 @@ const registerUser = asyncHandler(async (req, res) => {
     username = `${baseUsername}${counter++}`;
   }
 
-  const user = await Prisma.user.create({
+  await Prisma.user.create({
     data: {
       fullName,
       username,
@@ -133,9 +133,7 @@ const registerUser = asyncHandler(async (req, res) => {
       provider: "email",
     },
   });
-
-  const token = generateAccessToken(user.id, user.email);
-  return res.status(201).json(new ApiResponse(201, "User created", { token }));
+  return res.status(201).json(new ApiResponse(201, "User created"));
 });
 
 const loginUser = asyncHandler(async (req, res) => {
