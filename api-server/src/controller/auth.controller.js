@@ -17,11 +17,11 @@ const cookieOptions = {
   path: "/", //  Available across routes
   maxAge: 1000 * 60 * 60 * 24 * 7, // Optional: 7 days
 };
-
 const registerUser = asyncHandler(async (req, res) => {
   const { code } = req.body;
 
   if (code) {
+    // Exchange code for GitHub access token
     const tokenRes = await axios.post(
       "https://github.com/login/oauth/access_token",
       {
@@ -32,37 +32,44 @@ const registerUser = asyncHandler(async (req, res) => {
       { headers: { Accept: "application/json" } }
     );
 
+    if (tokenRes.data.error) {
+      return ApiError.send(res, 401, tokenRes.data.error_description || "Invalid GitHub code");
+    }
+
     const accessToken = tokenRes.data.access_token;
     if (!accessToken) return ApiError.send(res, 401, "Invalid GitHub code");
 
-    const { data: githubUser } = await axios.get(
-      "https://api.github.com/user",
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      }
-    );
+    // Fetch GitHub user profile
+    const { data: githubUser } = await axios.get("https://api.github.com/user", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
     let email = githubUser.email;
 
+    // If email not public, fetch verified primary email
     if (!email) {
-      const { data: emails } = await axios.get(
-        "https://api.github.com/user/emails",
-        {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        }
-      );
+      const { data: emails } = await axios.get("https://api.github.com/user/emails", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
 
       const primaryEmailObj = emails.find((e) => e.primary && e.verified);
       if (!primaryEmailObj)
-        return ApiError.send(
-          res,
-          400,
-          "GitHub email not available or not verified"
-        );
+        return ApiError.send(res, 400, "GitHub email not available or not verified");
 
       email = primaryEmailObj.email;
     }
 
+    // Fetch all user repos
+    const { data: githubRepos } = await axios.get("https://api.github.com/user/repos", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: {
+        per_page: 100,
+        sort: "updated",
+        direction: "desc",
+      },
+    });
+
+    // Find user by providerId or by email
     let user = await Prisma.user.findFirst({
       where: {
         provider: "github",
@@ -74,11 +81,12 @@ const registerUser = asyncHandler(async (req, res) => {
       user = await Prisma.user.findUnique({ where: { email } });
     }
 
+    // If user doesn't exist, create new
     if (!user) {
       const fullName = email.split("@")[0];
 
       // Generate a unique username
-      let baseUsername = email.split("@")[0];
+      let baseUsername = email.split("@")[0].toLowerCase();
       let username = baseUsername;
       let counter = 1;
       while (await Prisma.user.findUnique({ where: { username } })) {
@@ -90,20 +98,37 @@ const registerUser = asyncHandler(async (req, res) => {
           fullName,
           username,
           email,
-          password: "",
+          password: "", // empty since OAuth user
           provider: "github",
           providerId: githubUser.id.toString(),
+          githubAccessToken: accessToken, // Save the access token with correct field name
         },
+      });
+    } else {
+      // Update existing user with latest accessToken
+      await Prisma.user.update({
+        where: { id: user.id },
+        data: { githubAccessToken: accessToken },
       });
     }
 
+    // Generate your app's JWT token for session
     const token = generateAccessToken(user.id, user.email);
+
+    // Return user token and repos fetched from GitHub
     return res
       .status(200)
       .cookie("accessToken", token, cookieOptions)
-      .json(new ApiResponse(200, "GitHub signup successful", { token }));
+      .json(
+        new ApiResponse(200, "GitHub signup successful", {
+          token,
+          githubUser,
+          githubRepos,
+        })
+      );
   }
 
+  // Fallback: regular email/password signup
   const schema = z.object({
     fullName: z.string().min(2, "Full name is required"),
     email: z.string().email(),
@@ -135,6 +160,7 @@ const registerUser = asyncHandler(async (req, res) => {
   });
   return res.status(201).json(new ApiResponse(201, "User created"));
 });
+
 
 const loginUser = asyncHandler(async (req, res) => {
   const schema = z.object({
