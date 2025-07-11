@@ -33,42 +33,48 @@ const registerUser = asyncHandler(async (req, res) => {
     );
 
     if (tokenRes.data.error) {
-      return ApiError.send(res, 401, tokenRes.data.error_description || "Invalid GitHub code");
+      return ApiError.send(
+        res,
+        401,
+        tokenRes.data.error_description || "Invalid GitHub code"
+      );
     }
 
     const accessToken = tokenRes.data.access_token;
     if (!accessToken) return ApiError.send(res, 401, "Invalid GitHub code");
 
     // Fetch GitHub user profile
-    const { data: githubUser } = await axios.get("https://api.github.com/user", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
+    const { data: githubUser } = await axios.get(
+      "https://api.github.com/user",
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }
+    );
 
     let email = githubUser.email;
 
     // If email not public, fetch verified primary email
     if (!email) {
-      const { data: emails } = await axios.get("https://api.github.com/user/emails", {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
+      const { data: emails } = await axios.get(
+        "https://api.github.com/user/emails",
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
 
       const primaryEmailObj = emails.find((e) => e.primary && e.verified);
       if (!primaryEmailObj)
-        return ApiError.send(res, 400, "GitHub email not available or not verified");
+        return ApiError.send(
+          res,
+          400,
+          "GitHub email not available or not verified"
+        );
 
       email = primaryEmailObj.email;
     }
 
-    // Fetch all user repos
-    const { data: githubRepos } = await axios.get("https://api.github.com/user/repos", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      params: {
-        per_page: 100,
-        sort: "updated",
-        direction: "desc",
-      },
-    });
 
+  
     // Find user by providerId or by email
     let user = await Prisma.user.findFirst({
       where: {
@@ -119,13 +125,7 @@ const registerUser = asyncHandler(async (req, res) => {
     return res
       .status(200)
       .cookie("accessToken", token, cookieOptions)
-      .json(
-        new ApiResponse(200, "GitHub signup successful", {
-          token,
-          githubUser,
-          githubRepos,
-        })
-      );
+      .json(new ApiResponse(200, "GitHub signup successful"));
   }
 
   // Fallback: regular email/password signup
@@ -160,7 +160,6 @@ const registerUser = asyncHandler(async (req, res) => {
   });
   return res.status(201).json(new ApiResponse(201, "User created"));
 });
-
 
 const loginUser = asyncHandler(async (req, res) => {
   const schema = z.object({

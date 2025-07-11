@@ -11,7 +11,7 @@ const ecsClient = new ECSClient({
   },
 });
 
-export const githubWebhook = asyncHandler(async (req, res) => {
+const githubWebhook = asyncHandler(async (req, res) => {
   const event = req.headers["x-github-event"];
   if (event !== "push") return res.status(204).send();
 
@@ -24,7 +24,8 @@ export const githubWebhook = asyncHandler(async (req, res) => {
   const existing = await Prisma.deployment.findFirst({
     where: { projectId: project.id, status: "IN_PROGRESS" },
   });
-  if (existing) return res.status(409).json({ message: "Deployment already running" });
+  if (existing)
+    return res.status(409).json({ message: "Deployment already running" });
 
   const deployment = await Prisma.deployment.create({
     data: { projectId: project.id, status: "QUEUED" },
@@ -60,3 +61,40 @@ export const githubWebhook = asyncHandler(async (req, res) => {
 
   return res.status(201).json(new ApiResponse(201, "GitHub build triggered"));
 });
+
+const fetchGitHubRepos = asyncHandler(async (req, res) => {
+  if (!req.user || !req.user.id) {
+    return ApiError.send(res, 401, "Unauthorized");
+  }
+
+  const user = await Prisma.user.findUnique({
+    where: { id: req.user.id },
+    select: {
+      githubAccessToken: true,
+    },
+  });
+
+  if (!user || !user.githubAccessToken) {
+    return ApiError.send(res, 400, "GitHub access token not found for user");
+  }
+
+  const { data: githubRepos } = await axios.get(
+    "https://api.github.com/user/repos",
+    {
+      headers: {
+        Authorization: `Bearer ${user.githubAccessToken}`,
+      },
+      params: {
+        per_page: 100,
+        sort: "updated",
+        direction: "desc",
+      },
+    }
+  );
+
+  return res
+    .status(200)
+    .json(new ApiResponse(200, "Fetched GitHub repositories", githubRepos));
+});
+
+export { githubWebhook, fetchGitHubRepos };
