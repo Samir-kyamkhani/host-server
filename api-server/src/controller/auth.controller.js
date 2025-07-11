@@ -186,4 +186,11 @@ const getCurrentUser = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, "Current user fatched.", dbUser));
 });
 
-export { registerUser, loginUser, getCurrentUser };
+const logoutUser = asyncHandler(async (req, res) => {
+  return res
+    .clearCookie("accessToken", cookieOptions)
+    .status(200)
+    .json(new ApiResponse(200, "Logout successful"));
+});
+
+export { registerUser, loginUser, getCurrentUser, logoutUser };
