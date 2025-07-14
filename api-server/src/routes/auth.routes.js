@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getCurrentUser,
+  githubConnect,
   loginUser,
   logoutUser,
   registerUser,
@@ -15,5 +16,9 @@ router.post("/login", loginUser);
 router.post("/logout", authMiddleware, logoutUser);
 router.get("/get-current-user", authMiddleware, getCurrentUser);
 router.post("/subscribe", authMiddleware, createSubscription);
+
+router.post("/github-connect", authMiddleware, githubConnect);
+
+
 
 export default router;

@@ -6,11 +6,21 @@ import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { config, s3Client } from "../services/config.js";
 import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
+import { hashPassword } from "../utils/utils.js";
+
 
 const createProject = asyncHandler(async (req, res) => {
   const schema = z.object({
     name: z.string().min(1, "Project name is required"),
-    gitURL: z.string().url("A valid git URL is required"),
+    gitUrl: z.string().url("A valid git URL is required"),
+    envVars: z
+      .array(
+        z.object({
+          key: z.string().min(1),
+          value: z.string().optional(),
+        })
+      )
+      .optional(),
   });
 
   const safeParseResult = schema.safeParse(req.body);
@@ -18,12 +28,12 @@ const createProject = asyncHandler(async (req, res) => {
     return ApiError.send(res, 400, safeParseResult.error.flatten());
   }
 
-  const { name, gitURL } = safeParseResult.data;
+  const { name, gitUrl, envVars } = safeParseResult.data;
 
-  const normalizedGitURL = gitURL.trim().toLowerCase();
+  const normalizedgitUrl = gitUrl.trim().toLowerCase();
 
   const existingProject = await Prisma.project.findUnique({
-    where: { gitURL: normalizedGitURL },
+    where: { gitUrl: normalizedgitUrl },
   });
 
   if (existingProject) {
@@ -34,19 +44,37 @@ const createProject = asyncHandler(async (req, res) => {
     );
   }
 
+
+  const hashedEnvVars = await Promise.all(
+    (envVars || []).map(async ({ key, value }) => ({
+      key,
+      value: await hashPassword(value),
+    }))
+  );
+
   const project = await Prisma.project.create({
     data: {
       name,
-      gitURL,
+      gitUrl: normalizedgitUrl,
       subdomain: generateSlug(),
       userId: req.user.id,
+      envVars: hashedEnvVars.length
+        ? {
+          create: hashedEnvVars,
+        }
+        : undefined,
+    },
+    include: {
+      envVars: true,
     },
   });
 
+
   return res
     .status(201)
-    .json(new ApiResponse(201, "✅ Project created successfully", project));
+    .json(new ApiResponse(201, "Project created successfully", project));
 });
+
 
 const getProjects = asyncHandler(async (req, res) => {
   const { id } = req.user;
@@ -69,13 +97,13 @@ const getProjectById = asyncHandler(async (req, res) => {
 });
 
 const updateProject = asyncHandler(async (req, res) => {
-  const { name, gitURL } = req.body;
+  const { name, gitUrl } = req.body;
 
   const updated = await Prisma.project.update({
     where: { id: req.params.id },
     data: {
       name,
-      gitURL,
+      gitUrl,
     },
   });
 
@@ -170,7 +198,7 @@ const resolveDomain = asyncHandler(async (req, res) => {
     .json(
       new ApiResponse(200, "Project resolved", { subdomain: project.subdomain })
     );
-}); 
+});
 
 export {
   createProject,

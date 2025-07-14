@@ -2,6 +2,7 @@ import Prisma from "../db/db.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { ECSClient, RunTaskCommand } from "@aws-sdk/client-ecs";
+import axios from "axios";
 
 const ecsClient = new ECSClient({
   region: process.env.AWS_REGION,
@@ -16,9 +17,9 @@ const githubWebhook = asyncHandler(async (req, res) => {
   if (event !== "push") return res.status(204).send();
 
   const { repository } = req.body;
-  const gitURL = repository.clone_url.toLowerCase();
+  const gitUrl = repository.clone_url.toLowerCase();
 
-  const project = await Prisma.project.findUnique({ where: { gitURL } });
+  const project = await Prisma.project.findUnique({ where: { gitUrl } });
   if (!project) return res.status(404).json({ message: "No project matched" });
 
   const existing = await Prisma.deployment.findFirst({
@@ -48,7 +49,7 @@ const githubWebhook = asyncHandler(async (req, res) => {
         {
           name: "builder-image",
           environment: [
-            { name: "GIT_REPOSITORY__URL", value: gitURL },
+            { name: "GIT_REPOSITORY__URL", value: gitUrl },
             { name: "PROJECT_ID", value: project.id },
             { name: "DEPLOYMENT_ID", value: deployment.id },
           ],
