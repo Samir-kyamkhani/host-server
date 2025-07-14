@@ -170,7 +170,7 @@ const loginUser = asyncHandler(async (req, res) => {
   const { email, password } = schema.parse(req.body);
 
 
-  const user = await prisma.user.findUnique({
+  const user = await Prisma.user.findUnique({
     where: { email },
     select: { id: true, email: true, password: true, provider: true },
   });

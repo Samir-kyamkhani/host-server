@@ -2,23 +2,31 @@ import Prisma from "../db/db.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 
-export const deploymentWebhook = asyncHandler(async (req, res) => {
-  const { deploymentId, status, logs = [] } = req.body;
+export const addDeploymentLog = asyncHandler(async (req, res) => {
+  const { deploymentId, message } = req.body;
 
-  if (!deploymentId || !status) {
-    return res.status(400).json({ message: "Missing parameters" });
+  if (!deploymentId || !message) {
+    return res.status(400).json({ message: "Missing deploymentId or message" });
   }
 
-  await Prisma.deployment.update({
-    where: { id: deploymentId },
-    data: { status },
+  await Prisma.deploymentLog.create({
+    data: { deploymentId, log: message },
   });
 
-  if (logs.length) {
-    await Prisma.deploymentLog.createMany({
-      data: logs.map((log) => ({ deploymentId, log })),
-    });
-  }
+  return res.status(201).json(new ApiResponse(201, "Log saved"));
+});
 
-  return res.status(200).json(new ApiResponse(200, "Webhook received"));
+// GET /logs?deploymentId=clx1...
+export const getLogsByDeployment = asyncHandler(async (req, res) => {
+  const { deploymentId } = req.query;
+
+  if (!deploymentId)
+    return res.status(400).json({ message: "Missing deploymentId" });
+
+  const logs = await Prisma.deploymentLog.findMany({
+    where: { deploymentId },
+    orderBy: { createdAt: "asc" },
+  });
+
+  return res.status(200).json(new ApiResponse(200, "Logs fetched", logs));
 });

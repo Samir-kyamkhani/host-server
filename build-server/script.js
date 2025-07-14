@@ -3,6 +3,17 @@ import path from "path";
 import fs from "fs";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import mime from "mime-types";
+import axios from "axios";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+import { generateSlug } from "random-word-slugs";
+
+const subdoamin = generateSlug()
+
+dotenv.config({ path: "./.env" });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const s3Client = new S3Client({
   region: process.env.S3_REGION,
@@ -17,6 +28,15 @@ const DEPLOYMENT_ID = process.env.DEPLOYMENT_ID;
 
 async function publishLog(log) {
   console.log(`[${PROJECT_ID}/${DEPLOYMENT_ID}] ${log}`);
+
+  try {
+    await axios.post(`${process.env.API_BASE_URL}/logs`, {
+      deploymentId: DEPLOYMENT_ID,
+      message: log,
+    });
+  } catch (err) {
+    console.error("❌ Failed to send log:", err.message);
+  }
 }
 
 function runCommand(command, cwd) {
@@ -107,8 +127,8 @@ async function uploadToS3(folderPath) {
     const contentType = mime.lookup(filePath) || "application/octet-stream";
 
     const command = new PutObjectCommand({
-      Bucket: "host-server-bucket",
-      Key: `__outputs/${PROJECT_ID}/${DEPLOYMENT_ID}/${relativePath}`,
+      Bucket: "host-server-bucket-v2",
+      Key: `__outputs/${subdoamin}/${relativePath}`,
       Body: fileStream,
       ContentType: contentType,
     });
@@ -184,6 +204,8 @@ async function init() {
   }
 
   const distPath = path.join(outDirPath, outputDir);
+  console.log(distPath);
+
   if (!fs.existsSync(distPath)) {
     await publishLog(`❌ Output folder "${outputDir}" not found`);
     return process.exit(1);

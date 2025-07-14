@@ -4,36 +4,40 @@ import Prisma from "../db/db.js";
 import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
-import { config, s3Client } from "../services/config.js";
+import { config, ecsClient, s3Client } from "../services/config.js";
 import { DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 import { hashPassword } from "../utils/utils.js";
-
+import { RunTaskCommand } from "@aws-sdk/client-ecs";
 
 const createProject = asyncHandler(async (req, res) => {
   const schema = z.object({
     name: z.string().min(1, "Project name is required"),
-    gitUrl: z.string().url("A valid git URL is required"),
+    gitUrl: z.string().url("A valid Git URL is required"),
     envVars: z
       .array(
         z.object({
-          key: z.string().min(1),
+          key: z.string().min(1, "Environment variable key is required"),
           value: z.string().optional(),
         })
       )
       .optional(),
   });
 
-  const safeParseResult = schema.safeParse(req.body);
-  if (!safeParseResult.success) {
-    return ApiError.send(res, 400, safeParseResult.error.flatten());
+  const result = schema.safeParse(req.body);
+  if (!result.success) {
+    return ApiError.send(res, 400, {
+      message: "Validation failed",
+      errors: result.error.flatten(),
+    });
   }
 
-  const { name, gitUrl, envVars } = safeParseResult.data;
+  const { name, gitUrl, envVars } = result.data;
 
-  const normalizedgitUrl = gitUrl.trim().toLowerCase();
+  const normalizedGitUrl = gitUrl.trim().toLowerCase();
 
+  // Check if project already exists
   const existingProject = await Prisma.project.findUnique({
-    where: { gitUrl: normalizedgitUrl },
+    where: { gitUrl: normalizedGitUrl },
   });
 
   if (existingProject) {
@@ -44,37 +48,96 @@ const createProject = asyncHandler(async (req, res) => {
     );
   }
 
+  // Hash environment variable values (if any)
+  const hashedEnvVars = envVars
+    ? await Promise.all(
+        envVars.map(async ({ key, value }) => ({
+          key,
+          value: value ? await hashPassword(value) : null,
+        }))
+      )
+    : [];
 
-  const hashedEnvVars = await Promise.all(
-    (envVars || []).map(async ({ key, value }) => ({
-      key,
-      value: await hashPassword(value),
-    }))
-  );
-
-  const project = await Prisma.project.create({
+  // Create project in DB
+  const createdProject = await Prisma.project.create({
     data: {
       name,
-      gitUrl: normalizedgitUrl,
+      gitUrl: normalizedGitUrl,
       subdomain: generateSlug(),
       userId: req.user.id,
       envVars: hashedEnvVars.length
         ? {
-          create: hashedEnvVars,
-        }
+            create: hashedEnvVars,
+          }
         : undefined,
-    },
-    include: {
-      envVars: true,
     },
   });
 
+  if (!createdProject?.id) {
+    return ApiError.send(res, 500, "Project creation failed.");
+  }
+
+  const projectId = createdProject.id;
+
+  // Re-fetch full project just in case it's needed
+  const project = await Prisma.project.findUnique({
+    where: { id: projectId },
+  });
+
+  if (!project) {
+    return ApiError.send(res, 404, "Project not found after creation.");
+  }
+
+  // Check if deployment is already in progress
+  const existingDeployment = await Prisma.deployment.findFirst({
+    where: { projectId, status: "IN_PROGRESS" },
+  });
+
+  if (existingDeployment) {
+    return ApiError.send(res, 409, "Deployment already in progress.");
+  }
+
+  // Create a new deployment entry
+  const deployment = await Prisma.deployment.create({
+    data: {
+      projectId,
+      status: "QUEUED",
+    },
+  });
+
+  // Start ECS task for deployment
+  const command = new RunTaskCommand({
+    cluster: config.CLUSTER,
+    taskDefinition: config.TASK,
+    launchType: "FARGATE",
+    count: 1,
+    networkConfiguration: {
+      awsvpcConfiguration: {
+        assignPublicIp: "ENABLED",
+        subnets: config.SUBNETS,
+        securityGroups: config.SECURITY_GROUPS,
+      },
+    },
+    overrides: {
+      containerOverrides: [
+        {
+          name: "builder-image",
+          environment: [
+            { name: "GIT_REPOSITORY__URL", value: project.gitUrl },
+            { name: "PROJECT_ID", value: String(projectId) },
+            { name: "DEPLOYMENT_ID", value: String(deployment.id) },
+          ],
+        },
+      ],
+    },
+  });
+
+  await ecsClient.send(command);
 
   return res
     .status(201)
-    .json(new ApiResponse(201, "Project created successfully", project));
+    .json(new ApiResponse(201, "Deployment started", deployment));
 });
-
 
 const getProjects = asyncHandler(async (req, res) => {
   const { id } = req.user;

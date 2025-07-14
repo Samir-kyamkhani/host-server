@@ -25,4 +25,5 @@ const config = {
   BUCKET_NAME: process.env.S3_BUCKET_NAME,
 };
 
+
 export { ecsClient, s3Client, config };
