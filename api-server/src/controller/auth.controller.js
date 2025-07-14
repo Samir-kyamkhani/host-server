@@ -78,7 +78,7 @@ const registerUser = asyncHandler(async (req, res) => {
     // Find user by providerId or by email
     let user = await Prisma.user.findFirst({
       where: {
-        provider: "github",
+        provider: { contains: "github" },
         providerId: githubUser.id.toString(),
       },
     });
