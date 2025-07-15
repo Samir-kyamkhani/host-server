@@ -9,7 +9,7 @@ import { authMiddleware } from "../middlewares/auth.middleware.js";
 const router = Router();
 
 router.post("/logs", addDeploymentLog);
-router.get("/get-logs", authMiddleware, getLogsByDeployment);
+router.get("/get-logs/:id", authMiddleware, getLogsByDeployment);
 router.post("/github", authMiddleware, githubWebhook);
 
 export default router;

@@ -18,13 +18,14 @@ export const addDeploymentLog = asyncHandler(async (req, res) => {
 
 // GET /logs?deploymentId=clx1...
 export const getLogsByDeployment = asyncHandler(async (req, res) => {
-  const { deploymentId } = req.query;
+  const { id } = req.params;
 
-  if (!deploymentId)
+  if (!id) {
     return res.status(400).json({ message: "Missing deploymentId" });
+  }
 
   const logs = await Prisma.deploymentLog.findMany({
-    where: { deploymentId },
+    where: { deploymentId: id.toString() },
     orderBy: { createdAt: "asc" },
   });
 
