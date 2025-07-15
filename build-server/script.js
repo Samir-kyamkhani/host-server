@@ -127,7 +127,7 @@ async function uploadToS3(folderPath) {
     const contentType = mime.lookup(filePath) || "application/octet-stream";
 
     const command = new PutObjectCommand({
-      Bucket: "host-server-bucket-v2",
+      Bucket: process.env.S3_BUCKET,
       Key: `__outputs/${subdoamin}/${relativePath}`,
       Body: fileStream,
       ContentType: contentType,
