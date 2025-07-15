@@ -8,7 +8,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { generateSlug } from "random-word-slugs";
 
-const subdoamin = generateSlug()
+const subdoamin = generateSlug();
 
 dotenv.config({ path: "./.env" });
 
@@ -28,7 +28,6 @@ const DEPLOYMENT_ID = process.env.DEPLOYMENT_ID;
 
 async function publishLog(log) {
   console.log(`[${PROJECT_ID}/${DEPLOYMENT_ID}] ${log}`);
-
   try {
     await axios.post(`${process.env.API_BASE_URL}/logs`, {
       deploymentId: DEPLOYMENT_ID,
@@ -117,12 +116,16 @@ function getAllFiles(dirPath, arrayOfFiles = []) {
   return arrayOfFiles;
 }
 
-async function uploadToS3(folderPath) {
+async function uploadToS3(folderPath, framework) {
   await publishLog("⏫ Uploading files to S3...");
   const files = getAllFiles(folderPath);
 
   for (const filePath of files) {
-    const relativePath = path.relative(folderPath, filePath);
+    const relativePath =
+      framework === "static"
+        ? path.basename(filePath)
+        : path.relative(folderPath, filePath);
+
     const fileStream = fs.createReadStream(filePath);
     const contentType = mime.lookup(filePath) || "application/octet-stream";
 
@@ -203,15 +206,15 @@ async function init() {
     return await startNodeServer(outDirPath, startCmd, port);
   }
 
-  const distPath = path.join(outDirPath, outputDir);
-  console.log(distPath);
+  const distPath =
+    framework === "static" ? outDirPath : path.join(outDirPath, outputDir);
 
   if (!fs.existsSync(distPath)) {
     await publishLog(`❌ Output folder "${outputDir}" not found`);
     return process.exit(1);
   }
 
-  await uploadToS3(distPath);
+  await uploadToS3(distPath, framework);
   process.exit(0);
 }
 
