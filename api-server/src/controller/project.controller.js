@@ -31,11 +31,10 @@ const createProject = asyncHandler(async (req, res) => {
     });
   }
 
-  const { name, gitUrl, envVars } = result.data;
-
+  const { name, gitUrl, envVars = [] } = result.data;
   const normalizedGitUrl = gitUrl.trim().toLowerCase();
 
-  // Check if project already exists
+  // Check for existing project
   const existingProject = await Prisma.project.findUnique({
     where: { gitUrl: normalizedGitUrl },
   });
@@ -48,106 +47,99 @@ const createProject = asyncHandler(async (req, res) => {
     );
   }
 
-  // Hash environment variable values (if any)
-  const hashedEnvVars = envVars
-    ? await Promise.all(
-        envVars.map(async ({ key, value }) => ({
-          key,
-          value: value ? await hashPassword(value) : null,
-        }))
-      )
-    : [];
-
   const subdomain = generateSlug();
+  const hashedEnvVars = await Promise.all(
+    envVars.map(async ({ key, value }) => ({
+      key,
+      value: value ? await hashPassword(value) : null,
+    }))
+  );
 
-  const createdProject = await Prisma.project.create({
-    data: {
-      name,
-      gitUrl: normalizedGitUrl,
-      subdomain,
-      userId: req.user.id,
-    },
-  });
+  let project;
+  let deployment;
 
-  if (hashedEnvVars.length > 0) {
-    await Prisma.envVar.createMany({
-      data: hashedEnvVars.map(({ key, value }) => ({
-        key,
-        value,
-        projectId: createdProject.id,
-      })),
-      skipDuplicates: true,
-    });
-  }
-
-  if (!createdProject?.id) {
-    return ApiError.send(res, 500, "Project creation failed.");
-  }
-
-  const projectId = createdProject.id;
-
-  // Re-fetch full project just in case it's needed
-  const project = await Prisma.project.findUnique({
-    where: { id: projectId },
-  });
-
-  if (!project) {
-    return ApiError.send(res, 404, "Project not found after creation.");
-  }
-
-  // Check if deployment is already in progress
-  const existingDeployment = await Prisma.deployment.findFirst({
-    where: { projectId, status: "IN_PROGRESS" },
-  });
-
-  if (existingDeployment) {
-    return ApiError.send(res, 409, "Deployment already in progress.");
-  }
-
-  // Create a new deployment entry
-  const deployment = await Prisma.deployment.create({
-    data: {
-      projectId,
-      status: "QUEUED",
-    },
-  });
-
-  // Start ECS task for deployment
-  const command = new RunTaskCommand({
-    cluster: config.CLUSTER,
-    taskDefinition: config.TASK,
-    launchType: "FARGATE",
-    count: 1,
-    networkConfiguration: {
-      awsvpcConfiguration: {
-        assignPublicIp: "ENABLED",
-        subnets: config.SUBNETS,
-        securityGroups: config.SECURITY_GROUPS,
-      },
-    },
-    overrides: {
-      containerOverrides: [
-        {
-          name: "builder-image",
-          environment: [
-            { name: "GIT_REPOSITORY__URL", value: project.gitUrl },
-            { name: "DEPLOYMENT_ID", value: String(deployment.id) },
-            { name: "SUBDOMAIN", value: project.subdomain },
-            ...envVars.map(({ key, value }) => ({
-              name: key,
-              value: value || "",
-            })),
-          ],
+  try {
+    // Transaction: Create project and env vars
+    await Prisma.$transaction(async (tx) => {
+      project = await tx.project.create({
+        data: {
+          name,
+          gitUrl: normalizedGitUrl,
+          subdomain,
+          userId: req.user.id,
         },
-      ],
-    },
-  });
+      });
 
-  await ecsClient.send(command);
+      if (hashedEnvVars.length > 0) {
+        await tx.envVar.createMany({
+          data: hashedEnvVars.map(({ key, value }) => ({
+            key,
+            value,
+            projectId: project.id,
+          })),
+          skipDuplicates: true,
+        });
+      }
 
-  return res
-    .status(201)
-    .json(new ApiResponse(201, "Deployment started", deployment));
+      deployment = await tx.deployment.create({
+        data: {
+          projectId: project.id,
+          status: "QUEUED",
+        },
+      });
+    });
+
+    // ECS Deployment
+    const command = new RunTaskCommand({
+      cluster: config.CLUSTER,
+      taskDefinition: config.TASK,
+      launchType: "FARGATE",
+      count: 1,
+      networkConfiguration: {
+        awsvpcConfiguration: {
+          assignPublicIp: "ENABLED",
+          subnets: config.SUBNETS,
+          securityGroups: config.SECURITY_GROUPS,
+        },
+      },
+      overrides: {
+        containerOverrides: [
+          {
+            name: "builder-image",
+            environment: [
+              { name: "GIT_REPOSITORY__URL", value: project.gitUrl },
+              { name: "DEPLOYMENT_ID", value: String(deployment.id) },
+              { name: "SUBDOMAIN", value: project.subdomain },
+              ...envVars.map(({ key, value }) => ({
+                name: key,
+                value: value || "",
+              })),
+            ],
+          },
+        ],
+      },
+    });
+
+    await ecsClient.send(command);
+
+    return res
+      .status(201)
+      .json(new ApiResponse(201, "Deployment started", deployment));
+  } catch (err) {
+    // Cleanup: If ECS fails or anything else breaks, delete project and deployment
+    if (project?.id) {
+      await Prisma.deployment.deleteMany({ where: { projectId: project.id } });
+      await Prisma.envVar.deleteMany({ where: { projectId: project.id } });
+      await Prisma.project.delete({ where: { id: project.id } });
+    }
+
+    console.error("Error during project creation or ECS deployment:", err);
+    return ApiError.send(
+      res,
+      500,
+      "Deployment failed. Project creation has been rolled back."
+    );
+  }
 });
 
 const getProjects = asyncHandler(async (req, res) => {
