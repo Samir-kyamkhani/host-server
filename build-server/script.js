@@ -6,9 +6,6 @@ import mime from "mime-types";
 import axios from "axios";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
-import { generateSlug } from "random-word-slugs";
-
-const subdoamin = generateSlug();
 
 dotenv.config({ path: "./.env" });
 
@@ -23,12 +20,10 @@ const s3Client = new S3Client({
   },
 });
 
-const PROJECT_ID = process.env.PROJECT_ID;
 const DEPLOYMENT_ID = process.env.DEPLOYMENT_ID;
+const subdomain = process.env.SUBDOMAIN;
 
 async function publishLog(log) {
-  console.log(`[${PROJECT_ID}/${DEPLOYMENT_ID}] ${log}`);
-
   try {
     await axios.post(`${process.env.API_BASE_URL}/logs`, {
       deploymentId: DEPLOYMENT_ID,
@@ -128,7 +123,7 @@ async function uploadToS3(folderPath) {
 
     const command = new PutObjectCommand({
       Bucket: process.env.S3_BUCKET,
-      Key: `__outputs/${subdoamin}/${relativePath}`,
+      Key: `__outputs/${subdomain}/${relativePath}`,
       Body: fileStream,
       ContentType: contentType,
     });
@@ -140,6 +135,31 @@ async function uploadToS3(folderPath) {
   }
 
   await publishLog("🎉 Upload complete");
+}
+
+// Write dynamic env vars into .env file inside outDirPath
+function injectDynamicEnv(outDirPath) {
+  const envLines = [];
+
+  for (const key in process.env) {
+    if (
+      [
+        "GIT_REPOSITORY__URL",
+        "PROJECT_ID",
+        "DEPLOYMENT_ID",
+        "SUBDOMAIN",
+      ].includes(key)
+    )
+      continue;
+
+    if (key.startsWith("AWS_") || key.includes("NODE") || key === "PATH")
+      continue;
+
+    envLines.push(`${key}=${process.env[key]}`);
+  }
+
+  const envPath = path.join(outDirPath, ".env");
+  fs.writeFileSync(envPath, envLines.join("\n"));
 }
 
 async function init() {
@@ -183,6 +203,10 @@ async function init() {
 
   await publishLog(`🧠 Detected framework: ${framework}`);
   await publishLog(`🔧 Build command: ${buildCmd}`);
+
+  // Inject dynamic env vars
+  injectDynamicEnv(outDirPath);
+
   await runCommand(buildCmd, outDirPath);
   await publishLog("✅ Build successful");
 
@@ -205,7 +229,6 @@ async function init() {
 
   const distPath =
     framework === "static" ? outDirPath : path.join(outDirPath, outputDir);
-  console.log(distPath);
 
   if (!fs.existsSync(distPath)) {
     await publishLog(`❌ Output folder "${outputDir}" not found`);

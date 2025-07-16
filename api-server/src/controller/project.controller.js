@@ -58,20 +58,27 @@ const createProject = asyncHandler(async (req, res) => {
       )
     : [];
 
-  // Create project in DB
+  const subdomain = generateSlug();
+
   const createdProject = await Prisma.project.create({
     data: {
       name,
       gitUrl: normalizedGitUrl,
-      subdomain: generateSlug(),
+      subdomain,
       userId: req.user.id,
-      envVars: hashedEnvVars.length
-        ? {
-            create: hashedEnvVars,
-          }
-        : undefined,
     },
   });
+
+  if (hashedEnvVars.length > 0) {
+    await Prisma.envVar.createMany({
+      data: hashedEnvVars.map(({ key, value }) => ({
+        key,
+        value,
+        projectId: createdProject.id,
+      })),
+      skipDuplicates: true,
+    });
+  }
 
   if (!createdProject?.id) {
     return ApiError.send(res, 500, "Project creation failed.");
@@ -124,8 +131,12 @@ const createProject = asyncHandler(async (req, res) => {
           name: "builder-image",
           environment: [
             { name: "GIT_REPOSITORY__URL", value: project.gitUrl },
-            { name: "PROJECT_ID", value: String(projectId) },
             { name: "DEPLOYMENT_ID", value: String(deployment.id) },
+            { name: "SUBDOMAIN", value: project.subdomain },
+            ...envVars.map(({ key, value }) => ({
+              name: key,
+              value: value || "",
+            })),
           ],
         },
       ],
