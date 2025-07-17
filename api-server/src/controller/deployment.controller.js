@@ -4,6 +4,7 @@ import { asyncHandler } from "../utils/asyncHandler.js";
 import { ApiError } from "../utils/ApiError.js";
 import Prisma from "../db/db.js";
 import { config, ecsClient, s3Client } from "../services/config.js";
+import { ApiResponse } from "../utils/ApiResponse.js";
 
 const createDeployment = asyncHandler(async (req, res) => {
   const { projectId } = req.body;
@@ -60,13 +61,35 @@ const createDeployment = asyncHandler(async (req, res) => {
 });
 
 const getAllDeployments = asyncHandler(async (req, res) => {
+  const { id } = req.user;
+
+  if (!id) return ApiError.send(res, 401, "Unauthorized");
+
   const deployments = await Prisma.deployment.findMany({
-    orderBy: { createdAt: "desc" },
-    include: { project: true },
+    where: {
+      project: {
+        userId: id,
+      },
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+    include: {
+      project: {
+        include: {
+          user: true,
+        },
+      },
+    },
   });
+
+  if (deployments.length === 0) {
+    return ApiError.send(res, 404, "No deployments found");
+  }
 
   return res.json(new ApiResponse(200, "All deployments", deployments));
 });
+
 
 const getDeploymentById = asyncHandler(async (req, res) => {
   const { id } = req.params;
