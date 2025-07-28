@@ -8,10 +8,9 @@ datasource db {
 }
 
 enum DeploymentStatus {
-  NOT_STARTED
   QUEUED
-  IN_PROGRESS
-  READY
+  RUNNING
+  SUCCESS
   FAILED
 }
 
@@ -39,10 +38,10 @@ model User {
   fullName          String
   username          String   @unique
   email             String   @unique
-  password          String? // Nullable because OAuth users won't have a password
-  provider          String? // e.g. "github", "email"
-  providerId        String? // GitHub or Google ID
-  githubAccessToken String? // Store OAuth access token for GitHub (optional, encrypted recommended)
+  password          String?
+  provider          String?
+  providerId        String?
+  githubAccessToken String?
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
@@ -63,8 +62,9 @@ model Subscription {
 }
 
 model Project {
-  id        String   @id @default(uuid())
+  id        String   @id @default(cuid())
   name      String
+  framework String?
   gitUrl    String   @unique @map("git_url")
   subdomain String   @unique
   createdAt DateTime @default(now())
@@ -76,29 +76,20 @@ model Project {
   deployments   Deployment[]
   customDomains CustomDomain[]
   domainLogs    DomainLog[]
-
-  envVars EnvVar[]
-}
-
-model EnvVar {
-  id        String  @id @default(uuid())
-  key       String
-  value     String
-  projectId String
-  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, key])
 }
 
 model Deployment {
-  id        String           @id @default(uuid())
-  projectId String           @map("project_id")
-  status    DeploymentStatus @default(NOT_STARTED)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @default(now())
+  id                String           @id @default(uuid())
+  projectId         String
+  status            DeploymentStatus @default(QUEUED)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  containerUrl      String?
+  taskDefinitionArn String?
+  taskArn           String?
 
-  project       Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  DeploymentLog DeploymentLog[]
+  project Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  logs    DeploymentLog[]
 }
 
 model DeploymentLog {
