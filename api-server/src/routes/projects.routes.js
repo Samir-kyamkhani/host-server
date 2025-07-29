@@ -4,22 +4,21 @@ import {
   deleteProject,
   getProjectById,
   getProjects,
-  resolveDomain,
   updateProject,
-} from "../controller/project.controller.js";
+} from "../controller/deployment.controller.js";
 import { authMiddleware } from "../middlewares/auth.middleware.js";
 import { fetchGitHubRepos } from "../controller/github.controller.js";
 
 const router = Router();
 
-router.post("/create", authMiddleware, createProject);
-router.get("/get-projects", authMiddleware, getProjects);
-router.get("/get-project/:id", authMiddleware, getProjectById);
-router.put("/update/:id", authMiddleware, updateProject);
-router.delete("/delete/:id", authMiddleware, deleteProject);
-// For proxy server (no auth required)
-router.get("/repos", authMiddleware, fetchGitHubRepos);
+// Project management routes
+router.post("/", authMiddleware, createProject);
+router.get("/", authMiddleware, getProjects);
+router.get("/:id", authMiddleware, getProjectById);
+router.put("/:id", authMiddleware, updateProject);
+router.delete("/:id", authMiddleware, deleteProject);
 
-router.get("/resolve", resolveDomain);
+// GitHub integration
+router.get("/github/repos", authMiddleware, fetchGitHubRepos);
 
 export default router;

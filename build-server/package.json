@@ -1,22 +1,29 @@
 {
   "name": "build-server",
   "version": "1.0.0",
-  "main": "script.js",
+  "main": "src/script.js",
   "type": "module",
   "scripts": {
-    "dev": "node script.js"
+    "dev": "node src/script.js",
+    "start": "node src/script.js",
+    "deploy": "./deploy.sh"
   },
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "AWS Builder Server for automated deployment with API server integration",
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.842.0",
+    "@aws-sdk/client-s3": "^3.855.0",
+    "@aws-sdk/client-ecr": "^3.855.0",
+    "@aws-sdk/client-ecs": "^3.855.0",
+    "@aws-sdk/client-rds": "^3.855.0",
+    "@aws-sdk/client-elastic-load-balancing-v2": "^3.855.0",
+    "@aws-sdk/client-iam": "^3.855.0",
+    "@aws-sdk/client-ec2": "^3.855.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.855.0",
+    "@aws-sdk/client-secrets-manager": "^3.855.0",
     "axios": "^1.10.0",
     "dotenv": "^17.2.0",
-    "install": "^0.13.0",
-    "kafkajs": "^2.2.4",
-    "mime-types": "^3.0.1",
-    "npm": "^11.4.2",
-    "random-word-slugs": "^0.1.7"
+    "random-word-slugs": "^0.1.7",
+    "uuid": "^9.0.0"
   }
 }

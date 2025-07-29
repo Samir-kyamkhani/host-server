@@ -1,193 +1,652 @@
-import { RunTaskCommand } from "@aws-sdk/client-ecs";
-import { ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
-import { asyncHandler } from "../utils/asyncHandler.js";
-import { ApiError } from "../utils/ApiError.js";
-import Prisma from "../db/db.js";
-import { config, ecsClient, s3Client } from "../services/config.js";
-import { ApiResponse } from "../utils/ApiResponse.js";
+import { PrismaClient } from '@prisma/client';
+import { asyncHandler } from '../utils/asyncHandler.js';
+import { ApiError } from '../utils/ApiError.js';
+import { ApiResponse } from '../utils/ApiResponse.js';
+import { validateDeploymentRequest, generateUniqueSubdomain } from '../utils/deploymentValidator.js';
+import { triggerAWSBuilder, verifyWebhookSignature } from '../utils/awsTrigger.js';
+import { notificationService } from '../services/notificationService.js';
 
-const createDeployment = asyncHandler(async (req, res) => {
-  const { projectId } = req.body;
+const prisma = new PrismaClient();
 
-  if (!projectId) return ApiError.send(res, 400, "Missing projectId");
+// Create new project and trigger deployment
+const createProject = asyncHandler(async (req, res) => {
+  try {
+    const { name, gitUrl, envVars, db, framework } = req.body;
+    const userId = req.user.id;
 
-  const project = await Prisma.project.findUnique({ where: { id: projectId } });
-  if (!project) return ApiError.send(res, 404, "Project not found");
+    // Validate request
+    const validation = validateDeploymentRequest(req.body);
+    if (!validation.isValid) {
+      return ApiError.send(res, 400, validation.errors.join(', '));
+    }
 
-  const existing = await Prisma.deployment.findFirst({
-    where: { projectId, status: "IN_PROGRESS" },
+    // Check user subscription limits
+    const userSubscription = await prisma.subscription.findUnique({
+      where: { userId }
+    });
+
+    const projectCount = await prisma.project.count({
+      where: { userId }
+    });
+
+    // Default to FREE plan if no subscription exists
+    const userPlan = userSubscription?.plan || 'FREE';
+
+    if (userPlan === 'FREE' && projectCount >= 2) {
+      return ApiError.send(res, 403, 'Free plan limited to 1 project. Upgrade to create more projects.');
+    }
+
+    if (userPlan === 'STARTER' && projectCount >= 5) {
+      return ApiError.send(res, 403, 'Starter plan limited to 5 projects. Upgrade to create more projects.');
+    }
+
+    // Check if Git URL already exists
+    const existingProject = await prisma.project.findUnique({
+      where: { gitUrl }
   });
 
-  if (existing) return ApiError.send(res, 409, "Deployment already running");
+    if (existingProject) {
+      return ApiError.send(res, 400, 'A project with this Git URL already exists. Please use a different repository.');
+    }
 
-  const deployment = await Prisma.deployment.create({
+    // Generate unique subdomain
+    const subdomain = await generateUniqueSubdomain(name);
+
+    // Create project in database
+    const project = await prisma.project.create({
+      data: {
+        name,
+        gitUrl,
+        framework,
+        subdomain,
+        userId
+      }
+    });
+
+    // Create initial deployment record
+    const deployment = await prisma.deployment.create({
     data: {
-      projectId,
-      status: "QUEUED",
-    },
-  });
+        projectId: project.id,
+        status: 'QUEUED'
+      }
+    });
 
-  const command = new RunTaskCommand({
-    cluster: config.CLUSTER,
-    taskDefinition: config.TASK,
-    launchType: "FARGATE",
-    count: 1,
-    networkConfiguration: {
-      awsvpcConfiguration: {
-        assignPublicIp: "ENABLED",
-        subnets: config.SUBNETS,
-        securityGroups: config.SECURITY_GROUPS,
-      },
-    },
-    overrides: {
-      containerOverrides: [
+    // Prepare deployment configuration
+    const deploymentConfig = {
+      name,
+      gitUrl,
+      envVars: [
+        ...(envVars || []),
         {
-          name: "builder-image",
-          environment: [
-            { name: "GIT_REPOSITORY__URL", value: project.gitUrl },
-            { name: "PROJECT_ID", value: projectId },
-            { name: "DEPLOYMENT_ID", value: deployment.id },
-          ],
+          key: 'API_SERVER_URL',
+          value: process.env.API_BASE_URL
         },
+        {
+          key: 'API_KEY',
+          value: process.env.BUILDER_API_KEY
+        }
       ],
-    },
-  });
+      db,
+      framework
+    };
 
-  await ecsClient.send(command);
+    // Trigger AWS builder server
+    const triggerResult = await triggerAWSBuilder({
+      projectId: project.id,
+      deploymentId: deployment.id,
+      subdomain,
+      deploymentConfig
+    });
 
-  return res
-    .status(201)
-    .json(new ApiResponse(201, "Deployment started", deployment));
+    if (!triggerResult.success) {
+      // Update deployment status to failed
+      await prisma.deployment.update({
+        where: { id: deployment.id },
+        data: { status: 'FAILED' }
+      });
+
+      return ApiError.send(res, 500, 'Failed to trigger deployment', triggerResult.error);
+    }
+
+    // Log initial deployment log
+    await prisma.deploymentLog.create({
+      data: {
+        deploymentId: deployment.id,
+        projectId: project.id,
+        log: '🚀 Deployment triggered successfully'
+      }
+    });
+
+    // Send notification to user
+    await notificationService.sendDeploymentStarted({
+      userId,
+      projectName: name,
+      deploymentId: deployment.id
+    });
+
+    return res.status(201).json(
+      ApiResponse.success(
+        {
+          project: {
+            id: project.id,
+            name: project.name,
+            subdomain: project.subdomain,
+            framework: project.framework,
+            gitUrl: project.gitUrl,
+            createdAt: project.createdAt
+          },
+          deployment: {
+            id: deployment.id,
+            status: deployment.status,
+            createdAt: deployment.createdAt
+          }
+        },
+        'Project created and deployment started',
+        201
+      )
+    );
+
+  } catch (error) {
+    console.error('Create project error:', error);
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2002') {
+      if (error.meta?.target?.includes('git_url')) {
+        return ApiError.send(res, 400, 'A project with this Git URL already exists. Please use a different repository.');
+      }
+      if (error.meta?.target?.includes('subdomain')) {
+        return ApiError.send(res, 400, 'A project with this subdomain already exists. Please try a different project name.');
+      }
+      return ApiError.send(res, 400, 'A project with this information already exists.');
+    }
+    
+    return ApiError.send(res, 500, 'Internal server error');
+  }
 });
 
-const getAllDeployments = asyncHandler(async (req, res) => {
-  const { id } = req.user;
+// Get deployment status
+const getDeploymentStatus = asyncHandler(async (req, res) => {
+  try {
+    const { deploymentId } = req.params;
+    const userId = req.user.id;
 
-  if (!id) return ApiError.send(res, 401, "Unauthorized");
-
-  const deployments = await Prisma.deployment.findMany({
+    const deployment = await prisma.deployment.findFirst({
     where: {
-      project: {
-        userId: id,
-      },
-    },
-    orderBy: {
-      createdAt: "desc",
+        id: deploymentId,
+        project: { userId }
     },
     include: {
       project: {
-        include: {
-          user: true,
+          select: {
+            name: true,
+            subdomain: true,
+            framework: true
+          }
         },
-      },
-    },
+        logs: {
+          orderBy: { createdAt: 'desc' },
+          take: 50
+        }
+      }
   });
 
-  if (deployments.length === 0) {
-    return ApiError.send(res, 404, "No deployments found");
+    if (!deployment) {
+      return ApiError.send(res, 404, 'Deployment not found');
   }
 
-  return res.json(new ApiResponse(200, "All deployments", deployments));
+    return res.json(
+      ApiResponse.success(
+        {
+          deployment: {
+            id: deployment.id,
+            status: deployment.status,
+            containerUrl: deployment.containerUrl,
+            createdAt: deployment.createdAt,
+            updatedAt: deployment.updatedAt
+          },
+          project: deployment.project,
+          logs: deployment.logs
+        },
+        'Deployment status fetched successfully'
+      )
+    );
+
+  } catch (error) {
+    console.error('Get deployment status error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
 });
 
+// Get all deployments for a project
+const getProjectDeployments = asyncHandler(async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.id;
 
-const getDeploymentById = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-
-  const deployment = await Prisma.deployment.findUnique({
-    where: { id },
-    include: { project: true },
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        userId
+      },
+      include: {
+        deployments: {
+          orderBy: { createdAt: 'desc' },
+          include: {
+            logs: {
+              orderBy: { createdAt: 'desc' },
+              take: 10
+            }
+          }
+        }
+      }
   });
 
-  if (!deployment) return ApiError.send(res, 404, "Deployment not found");
+    if (!project) {
+      return ApiError.send(res, 404, 'Project not found');
+    }
 
-  return res.json(new ApiResponse(200, "Deployment found", deployment));
+    return res.json(
+      ApiResponse.success(
+        {
+          project: {
+            id: project.id,
+            name: project.name,
+            subdomain: project.subdomain,
+            framework: project.framework,
+            gitUrl: project.gitUrl,
+            createdAt: project.createdAt
+          },
+          deployments: project.deployments
+        },
+        'Project deployments fetched successfully'
+      )
+    );
+
+  } catch (error) {
+    console.error('Get project deployments error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
 });
 
-const updateDeployment = asyncHandler(async (req, res) => {
-  const { id } = req.params;
-  const { status } = req.body;
+// Redeploy project
+const redeployProject = asyncHandler(async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.id;
 
-  const deployment = await Prisma.deployment.update({
-    where: { id },
-    data: { status },
-    include: { project: true },
-  });
-
-  if (status === "DELETED") {
-    const projectId = deployment.projectId;
-    const deploymentId = deployment.id;
-
-    const prefix = `__outputs/${projectId}/${deploymentId}/`;
-
-    const listCommand = new ListObjectsV2Command({
-      Bucket: process.env.S3_BUCKET_NAME,
-      Prefix: prefix,
+    const project = await prisma.project.findFirst({
+      where: {
+        id: projectId,
+        userId
+      }
     });
 
-    const listedObjects = await s3Client.send(listCommand);
+    if (!project) {
+      return ApiError.send(res, 404, 'Project not found');
+    }
 
-    if (listedObjects.Contents && listedObjects.Contents.length > 0) {
-      const deleteCommand = new DeleteObjectsCommand({
-        Bucket: process.env.S3_BUCKET_NAME,
-        Delete: {
-          Objects: listedObjects.Contents.map((item) => ({
-            Key: item.Key,
-          })),
+    // Create new deployment
+    const deployment = await prisma.deployment.create({
+      data: {
+        projectId: project.id,
+        status: 'QUEUED'
+      }
+    });
+
+    // Prepare deployment configuration
+    const deploymentConfig = {
+      name: project.name,
+      gitUrl: project.gitUrl,
+      envVars: [
+        {
+          key: 'API_SERVER_URL',
+          value: process.env.API_BASE_URL
         },
+        {
+          key: 'API_KEY',
+          value: process.env.BUILDER_API_KEY
+        }
+      ],
+      db: project.db || 'mysql',
+      framework: project.framework
+    };
+
+    // Trigger AWS builder server
+    const triggerResult = await triggerAWSBuilder({
+      projectId: project.id,
+      deploymentId: deployment.id,
+      subdomain: project.subdomain,
+      deploymentConfig
+    });
+
+    if (!triggerResult.success) {
+      await prisma.deployment.update({
+        where: { id: deployment.id },
+        data: { status: 'FAILED' }
       });
 
-      await s3Client.send(deleteCommand);
+      return ApiError.send(res, 500, 'Failed to trigger redeployment');
     }
-  }
 
-  return res.json(new ApiResponse(200, "Deployment updated", deployment));
+    return res.json(
+      ApiResponse.success(
+        {
+          deployment: {
+            id: deployment.id,
+            status: deployment.status,
+            createdAt: deployment.createdAt
+          }
+        },
+        'Redeployment started successfully'
+      )
+    );
+
+  } catch (error) {
+    console.error('Redeploy project error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
 });
 
-const deleteDeployment = asyncHandler(async (req, res) => {
+// Webhook endpoint for builder server updates
+const deploymentWebhook = asyncHandler(async (req, res) => {
+  try {
+    const { deploymentId, status, url, error, logs } = req.body;
+
+    // Verify webhook signature
+    const signature = req.headers['x-webhook-signature'];
+    if (!verifyWebhookSignature(req.body, signature)) {
+      return ApiError.send(res, 401, 'Invalid webhook signature');
+    }
+
+    const deployment = await prisma.deployment.findUnique({
+      where: { id: deploymentId },
+      include: { project: { include: { user: true } } }
+    });
+
+    if (!deployment) {
+      return ApiError.send(res, 404, 'Deployment not found');
+    }
+
+    // Update deployment status
+    await prisma.deployment.update({
+      where: { id: deploymentId },
+      data: {
+        status: status.toUpperCase(),
+        containerUrl: url,
+        updatedAt: new Date()
+      }
+    });
+
+    // Add logs if provided
+    if (logs && Array.isArray(logs)) {
+      const logEntries = logs.map(log => ({
+        deploymentId,
+        projectId: deployment.projectId,
+        log: log.message || log
+      }));
+
+      await prisma.deploymentLog.createMany({
+        data: logEntries
+      });
+    }
+
+    // Send notifications based on status
+    if (status === 'SUCCESS') {
+      await notificationService.sendDeploymentSuccess({
+        userId: deployment.project.user.id,
+        projectName: deployment.project.name,
+        url: url
+      });
+    } else if (status === 'FAILED') {
+      await notificationService.sendDeploymentFailed({
+        userId: deployment.project.user.id,
+        projectName: deployment.project.name,
+        error: error
+      });
+    }
+
+    return res.json(
+      ApiResponse.success(null, 'Webhook processed successfully')
+    );
+
+  } catch (error) {
+    console.error('Deployment webhook error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
+});
+
+// Health check endpoint
+const healthCheck = asyncHandler(async (req, res) => {
+  try {
+    // Check database connection
+    await prisma.$queryRaw`SELECT 1`;
+    
+    // Check AWS connectivity (if configured)
+    let awsStatus = 'not-configured';
+    if (process.env.AWS_ECS_CLUSTER_ARN) {
+      try {
+        const AWS = await import('aws-sdk');
+        const ecs = new AWS.ECS({
+          region: process.env.AWS_REGION,
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+        });
+        
+        await ecs.describeClusters({
+          clusters: [process.env.AWS_ECS_CLUSTER_ARN]
+        }).promise();
+        
+        awsStatus = 'connected';
+      } catch (error) {
+        awsStatus = 'error';
+      }
+    }
+
+    return res.json(
+      ApiResponse.success(
+        {
+          status: 'healthy',
+          timestamp: new Date().toISOString(),
+          services: {
+            database: 'connected',
+            aws: awsStatus
+          }
+        },
+        'Service health check completed'
+      )
+    );
+
+  } catch (error) {
+    return ApiError.send(res, 503, 'Service unhealthy', error.message);
+  }
+});
+
+// Project Management Functions (merged from project.controller.js)
+
+// Get all projects for user
+const getProjects = asyncHandler(async (req, res) => {
+  try {
+    const { id } = req.user;
+
+    const projects = await prisma.project.findMany({
+      where: { userId: id },
+      include: {
+        deployments: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            status: true,
+            createdAt: true
+          }
+        }
+      }
+    });
+
+    return res.json(ApiResponse.success(projects, "Projects fetched successfully"));
+  } catch (error) {
+    console.error('Get projects error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
+});
+
+// Get project by ID
+const getProjectById = asyncHandler(async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const project = await prisma.project.findFirst({
+      where: { 
+        id,
+        userId 
+      },
+      include: {
+        deployments: {
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            containerUrl: true
+          }
+        },
+        customDomains: true
+      }
+    });
+
+    if (!project) {
+      return ApiError.send(res, 404, "Project not found");
+  }
+
+    return res.json(ApiResponse.success(project, "Project fetched successfully"));
+  } catch (error) {
+    console.error('Get project by ID error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
+});
+
+// Update project
+const updateProject = asyncHandler(async (req, res) => {
+  try {
   const { id } = req.params;
+    const userId = req.user.id;
+    const { name, gitUrl, framework } = req.body;
 
-  const deployment = await Prisma.deployment.findUnique({
+    const project = await prisma.project.findFirst({
+      where: { id, userId }
+    });
+
+    if (!project) {
+      return ApiError.send(res, 404, "Project not found");
+    }
+
+    // Check if new Git URL already exists (if changed)
+    if (gitUrl && gitUrl !== project.gitUrl) {
+      const existingProject = await prisma.project.findUnique({
+        where: { gitUrl }
+      });
+
+      if (existingProject) {
+        return ApiError.send(res, 400, 'A project with this Git URL already exists. Please use a different repository.');
+      }
+    }
+
+    const updated = await prisma.project.update({
     where: { id },
-    include: { project: true },
+      data: {
+        name,
+        gitUrl,
+        framework
+      },
   });
 
-  if (!deployment) return ApiError.send(res, 404, "Deployment not found");
+    return res.json(ApiResponse.success(updated, "Project updated successfully"));
+  } catch (error) {
+    console.error('Update project error:', error);
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2002') {
+      if (error.meta?.target?.includes('git_url')) {
+        return ApiError.send(res, 400, 'A project with this Git URL already exists. Please use a different repository.');
+      }
+      return ApiError.send(res, 400, 'A project with this information already exists.');
+    }
+    
+    return ApiError.send(res, 500, 'Internal server error');
+  }
+});
 
-  const projectId = deployment.projectId;
-  const deploymentId = deployment.id;
+// Delete project
+const deleteProject = asyncHandler(async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
 
-  const prefix = `__outputs/${projectId}/${deploymentId}/`;
-
-  const listCommand = new ListObjectsV2Command({
-    Bucket: config.BUCKET_NAME,
-    Prefix: prefix,
-  });
-
-  const listedObjects = await s3Client.send(listCommand);
-
-  if (listedObjects.Contents && listedObjects.Contents.length > 0) {
-    const deleteCommand = new DeleteObjectsCommand({
-      Bucket: BUCKET_NAME,
-      Delete: {
-        Objects: listedObjects.Contents.map((item) => ({
-          Key: item.Key,
-        })),
+    const project = await prisma.project.findFirst({
+      where: { id, userId },
+      include: {
+        deployments: {
+          include: {
+            logs: true,
+          },
+        },
+        customDomains: true,
+        domainLogs: true,
       },
     });
 
-    await s3Client.send(deleteCommand);
+    if (!project) {
+      return ApiError.send(res, 404, "Project not found");
+    }
+
+    // Delete all related data in a transaction
+    await prisma.$transaction(async (tx) => {
+      // Delete deployment logs
+      for (const deployment of project.deployments) {
+        await tx.deploymentLog.deleteMany({
+          where: { deploymentId: deployment.id },
+        });
   }
 
-  await Prisma.deployment.delete({ where: { id } });
+      // Delete deployments
+      await tx.deployment.deleteMany({
+        where: { projectId: project.id },
+      });
 
-  return res.json(new ApiResponse(200, "Deployment and S3 files deleted"));
+      // Delete domain logs
+      await tx.domainLog.deleteMany({
+        where: { projectId: project.id },
+      });
+
+      // Delete custom domains
+      await tx.customDomain.deleteMany({
+        where: { projectId: project.id },
+      });
+
+      // Delete the project
+      await tx.project.delete({
+        where: { id: project.id },
+      });
+    });
+
+    return res.json(ApiResponse.success(null, "Project deleted successfully"));
+  } catch (error) {
+    console.error('Delete project error:', error);
+    return ApiError.send(res, 500, 'Internal server error');
+  }
 });
 
 export {
-  createDeployment,
-  getAllDeployments,
-  getDeploymentById,
-  updateDeployment,
-  deleteDeployment,
+  createProject,
+  getProjects,
+  getProjectById,
+  updateProject,
+  deleteProject,
+  getDeploymentStatus,
+  getProjectDeployments,
+  redeployProject,
+  deploymentWebhook,
+  healthCheck
 };

@@ -1,7 +1,7 @@
 import jwt from "jsonwebtoken";
 import { ApiError } from "../utils/ApiError.js";
 
-const authMiddleware = async (req, __, next) => {
+const authMiddleware = async (req, res, next) => {
   try {
     const accessToken =
       req.cookies?.accessToken ||
@@ -11,7 +11,7 @@ const authMiddleware = async (req, __, next) => {
       return ApiError.send(res, "Access token is missing or invalid.", 401);
     }
 
-    const decoded = jwt.verify(accessToken, process.env.ACCESS_TOKEN_SECRET);
+    const decoded = jwt.verify(accessToken, process.env.JWT_SECRET);
 
     if (!decoded) {
       return ApiError.send(res, "Invalid token. Unauthorized access.", 401);

@@ -18,9 +18,9 @@ export const generateAccessToken = (id, email) => {
       id,
       email,
     },
-    process.env.ACCESS_TOKEN_SECRET,
+    process.env.JWT_SECRET,
     {
-      expiresIn: process.env.ACCESS_TOKEN_EXPIRY,
+      expiresIn: process.env.JWT_EXPIRY || '7d',
     }
   );
 };

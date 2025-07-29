@@ -1,19 +1,25 @@
 {
   "name": "api-server",
   "version": "1.0.0",
-  "description": "",
+  "description": "API server for project deployment and management with AWS integration",
   "license": "ISC",
   "author": "",
   "type": "module",
-  "main": "index.js",
+  "main": "src/index.js",
   "scripts": {
-    "dev": "nodemon -r dotenv/config --experimental-json-modules src/index.js",
-    "seed": "node prisma/seed.js"
+    "dev": "nodemon -r dotenv/config src/index.js",
+    "start": "node src/index.js",
+    "build": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio",
+    "seed": "node prisma/seed.js",
+    "lint": "prettier --check .",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "@aws-sdk/client-ecs": "^3.840.0",
-    "@aws-sdk/client-s3": "^3.844.0",
-    "@clickhouse/client": "^1.11.2",
+    "@aws-sdk/client-sqs": "^3.855.0",
     "@prisma/client": "^6.11.1",
     "axios": "^1.10.0",
     "bcryptjs": "^3.0.2",
@@ -22,7 +28,6 @@
     "dotenv": "^17.0.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
-    "npm": "^11.4.2",
     "random-word-slugs": "^0.1.7",
     "razorpay": "^2.9.6",
     "uuid": "^11.1.0",
@@ -32,5 +37,8 @@
     "nodemon": "^3.1.10",
     "prettier": "^3.6.2",
     "prisma": "^6.11.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }

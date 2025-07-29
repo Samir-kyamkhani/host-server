@@ -1,29 +1,55 @@
 import app from "./app.js";
 import dotenv from "dotenv";
-import  Prisma from "./db/db.js";
+import Prisma from "./db/db.js";
 
 dotenv.config({ path: "./.env" });
 
 const PORT = process.env.PORT || 9000;
 
-async function db_connection() {
+async function connectDatabase() {
   try {
     await Prisma.$connect();
-    console.log("DATABASE CONNECTED SUCCESSFULLY");
+    console.log("✅ Database connected successfully");
   } catch (error) {
-    console.error("DATABASE CONNECTION FAILED ::", error);
+    console.error("❌ Database connection failed:", error);
     throw error;
   }
 }
 
-db_connection()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`SERVER RUNNING ON http://localhost:${PORT}`);
+async function startServer() {
+  try {
+    await connectDatabase();
+    
+    const server = app.listen(PORT, () => {
+      console.log(`🚀 Server running on http://localhost:${PORT}`);
+      console.log(`📊 Health check available at http://localhost:${PORT}/api/v1/deployments/health`);
     });
-  })
-  .catch((error) => {
-    console.error("SERVER FAILED TO START ::", error);
-  });
+
+    // Graceful shutdown
+    process.on('SIGTERM', () => {
+      console.log('SIGTERM received, shutting down gracefully');
+      server.close(() => {
+        console.log('Process terminated');
+        Prisma.$disconnect();
+        process.exit(0);
+      });
+    });
+
+    process.on('SIGINT', () => {
+      console.log('SIGINT received, shutting down gracefully');
+      server.close(() => {
+        console.log('Process terminated');
+        Prisma.$disconnect();
+        process.exit(0);
+      });
+    });
+
+  } catch (error) {
+    console.error("❌ Server failed to start:", error);
+    process.exit(1);
+  }
+}
+
+startServer();
 
   
