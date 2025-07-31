@@ -11,3 +11,4 @@ node_modules
 
 /src/generated/prisma
 AWS_Task_Definition.json
+deploy-build-server.sh
