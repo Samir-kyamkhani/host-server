@@ -1,21 +1,16 @@
 export { 
   publishLog, 
-  detectFramework, 
   readProjectConfig, 
   generateDeploymentConfig, 
   updateDeploymentStatus, 
   runCommand 
 } from './utils.js';
 
-export { 
-  generateDockerfile, 
-  buildDockerImage, 
-  pushDockerImageToECR, 
-  buildAndPushDockerImage 
-} from './docker-builder.js';
-
 export {
   APIServerCommunication,
   createAPIServerCommunication,
   extractAPIServerConfig
-} from './api-communication.js'; 
+} from './api-communication.js';
+
+export { FrameworkHandler, detectFrameworkFromFiles } from './framework-handler.js';
+export { DeploymentHandler, ECSDeploymentHandler, S3DeploymentHandler } from './deployment-handler.js'; 

@@ -1,60 +1,41 @@
 export { 
   awsConfig, 
-  getDeploymentConfig, 
-  validateAWSConfig,
-  s3Client,
-  ecrClient,
-  ecsClient,
-  rdsClient,
-  elbClient,
-  iamClient,
-  ec2Client,
-  logsClient,
-  secretsClient
+  validateAWSConfig
 } from './aws-config.js';
 
 export { 
-  createECRRepository, 
-  pushImageToECR, 
-  getECRRepositoryUri 
+  createECRRepository
 } from './aws-ecr.js';
 
 export { 
-  createRDSInstance, 
-  getDatabaseEnvironmentVariables 
+  createRDSInstance
 } from './aws-rds.js';
 
 export { 
   createECSCluster, 
   createECSTaskDefinition, 
-  createECSService, 
-  runECSTask 
+  createECSService
 } from './aws-ecs.js';
 
 export { 
-  createLoadBalancer, 
-  createTargetGroup, 
-  createListener, 
-  createCompleteLoadBalancerSetup 
+  createCompleteLoadBalancerSetup
 } from './aws-loadbalancer.js';
 
 export { 
-  createS3Bucket, 
-  uploadToS3, 
-  uploadStaticFiles, 
-  configureStaticWebsiteHosting 
+  createS3Bucket,
+  configureS3StaticHosting,
+  uploadDirectoryToS3
 } from './aws-s3.js';
 
 export { 
-  createLogGroup, 
-  createECSLogGroup, 
-  putLogEvents, 
-  createApplicationLogGroup 
+  createECSLogGroup
 } from './aws-cloudwatch.js';
 
 export { 
-  createSecret, 
   createDatabaseSecret, 
-  getSecretValue, 
-  createEnvironmentSecret 
-} from './aws-secrets-manager.js'; 
+  createEnvironmentSecret
+} from './aws-secrets-manager.js';
+
+export {
+  createCloudFrontDistribution
+} from './aws-cloudfront.js'; 

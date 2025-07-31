@@ -44,6 +44,15 @@ export async function createECSTaskDefinition(props) {
   
   await publishLog(`🏗️ Creating ECS task definition: ${taskDefinitionName}`);
   
+  // Prepare secrets from AWS Secrets Manager
+  const secrets = [];
+  if (Object.keys(environment).length > 0) {
+    secrets.push({
+      name: "ENVIRONMENT_VARS",
+      valueFrom: `arn:aws:secretsmanager:${region}:${process.env.AWS_ACCOUNT_ID || "123456789012"}:secret:${projectId}-env-secret`,
+    });
+  }
+  
   const taskDefinition = {
     family: taskDefinitionName,
     networkMode: "awsvpc",
@@ -66,6 +75,7 @@ export async function createECSTaskDefinition(props) {
           name: key,
           value: value.toString(),
         })),
+        secrets: secrets,
         logConfiguration: {
           logDriver: "awslogs",
           options: {
@@ -144,36 +154,4 @@ export async function createECSService(props) {
   }
 }
 
-export async function runECSTask(props) {
-  const { 
-    projectId, 
-    clusterName, 
-    taskDefinitionArn, 
-    subnetIds, 
-    securityGroupIds, 
-    publishLog 
-  } = props;
-  
-  await publishLog(`⚡ Running ECS task for project: ${projectId}`);
-  
-  try {
-    const result = await ecsClient().send(new RunTaskCommand({
-      cluster: clusterName,
-      taskDefinition: taskDefinitionArn,
-      launchType: "FARGATE",
-      networkConfiguration: {
-        awsvpcConfiguration: {
-          subnets: subnetIds,
-          securityGroups: securityGroupIds,
-          assignPublicIp: "ENABLED",
-        },
-      },
-    }));
-    
-    await publishLog(`✅ ECS task started: ${result.tasks[0].taskArn}`);
-    return result.tasks[0];
-  } catch (error) {
-    await publishLog(`❌ Failed to run ECS task: ${error.message}`);
-    throw error;
-  }
-} 
+ 

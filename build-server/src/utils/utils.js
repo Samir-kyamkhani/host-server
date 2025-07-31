@@ -22,30 +22,19 @@ export async function publishLog(props) {
   }
 }
 
-export function detectFramework(props) {
-  const { framework, db } = props;
-  const frameworkLower = framework?.toLowerCase();
-  
-  switch (frameworkLower) {
-    case "laravel":
-      return "laravel";
-    case "nextjs":
-    case "next.js":
-      return db ? "nextjs-prisma" : "nextjs";
-    case "node":
-    case "nodejs":
-      return db ? "nodejs-prisma" : "nodejs";
-    case "static":
-      return "static";
-    default:
-      return "nodejs";
-  }
-}
+
 
 export function readProjectConfig(props) {
-  const { name, gitUrl, framework, db, envVars } = props;
+  const { name, gitUrl, framework, db, envVars, gitBranch } = props;
   
-  const detectedFramework = detectFramework({ framework, db });
+  // Validate required fields
+  if (!gitUrl) {
+    throw new Error("gitUrl is required for deployment");
+  }
+  
+  if (!name) {
+    throw new Error("name is required for deployment");
+  }
   
   const environment = {};
   if (envVars && Array.isArray(envVars)) {
@@ -56,16 +45,33 @@ export function readProjectConfig(props) {
     });
   }
   
+  // Normalize framework names
+  let normalizedFramework = framework;
+  if (framework === "node") {
+    normalizedFramework = "nodejs";
+  } else if (framework === "next") {
+    normalizedFramework = "nextjs";
+  }
+  
+  // Determine if framework needs database
+  const needsDatabase = normalizedFramework === "laravel" || (normalizedFramework && db && db !== null && db !== undefined);
+  
+  // Determine if framework uses Prisma
+  const usesPrisma = normalizedFramework && db && db !== null && db !== undefined && ["nextjs", "nodejs"].includes(normalizedFramework);
+  
+  // Determine deployment type
+  const deploymentType = ["vite", "static"].includes(normalizedFramework) ? "s3" : "ecs";
+  
   return {
-    name: name || "My App",
+    name: name,
     gitUrl,
-    framework: detectedFramework,
-    database: db || "mysql",
+    gitBranch: gitBranch || "main",
+    framework: normalizedFramework || "auto",
+    database: db || null,
     environment,
-    port: 3000,
-    buildCommand: "",
-    startCommand: "",
-    outputDir: "",
+    needsDatabase,
+    usesPrisma,
+    deploymentType,
   };
 }
 
@@ -74,10 +80,10 @@ export function generateDeploymentConfig(props) {
     deploymentId = uuidv4(),
     projectId = uuidv4(),
     subdomain = generateSlug(3, { format: "kebab" }),
-    region = process.env.AWS_REGION || "us-east-1",
+    region = process.env.AWS_REGION,
     vpcId = process.env.VPC_ID,
-    subnetIds = process.env.SUBNET_IDS?.split(",") || [],
-    securityGroupIds = process.env.SECURITY_GROUP_IDS?.split(",") || [],
+    subnetIds = process.env.SUBNET_IDS?.split(","),
+    securityGroupIds = process.env.SECURITY_GROUP_IDS?.split(","),
   } = props;
   
   return {

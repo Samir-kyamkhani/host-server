@@ -1,6 +1,8 @@
 import pkg from "@aws-sdk/client-s3";
-const { PutObjectCommand, CreateBucketCommand } = pkg;
+const { PutObjectCommand, CreateBucketCommand, PutBucketWebsiteCommand } = pkg;
 import { s3Client } from "./aws-config.js";
+import fs from "fs";
+import path from "path";
 
 export async function createS3Bucket(props) {
   const { bucketName, region, publishLog } = props;
@@ -11,7 +13,7 @@ export async function createS3Bucket(props) {
     await s3Client().send(new CreateBucketCommand({
       Bucket: bucketName,
       CreateBucketConfiguration: {
-        LocationConstraint: region === "us-east-1" ? undefined : region,
+        LocationConstraint: region === "ap-south-1" ? undefined : region,
       },
     }));
     
@@ -22,6 +24,32 @@ export async function createS3Bucket(props) {
       await publishLog(`ℹ️ S3 bucket already exists: ${bucketName}`);
       return bucketName;
     }
+    throw error;
+  }
+}
+
+export async function configureS3StaticHosting(props) {
+  const { bucketName, region, publishLog } = props;
+  
+  await publishLog(`🌐 Configuring S3 bucket for static website hosting: ${bucketName}`);
+  
+  try {
+    await s3Client().send(new PutBucketWebsiteCommand({
+      Bucket: bucketName,
+      WebsiteConfiguration: {
+        IndexDocument: {
+          Suffix: "index.html"
+        },
+        ErrorDocument: {
+          Key: "index.html"
+        }
+      }
+    }));
+    
+    await publishLog(`✅ S3 bucket configured for static hosting: ${bucketName}`);
+    return bucketName;
+  } catch (error) {
+    await publishLog(`❌ Failed to configure static hosting: ${error.message}`);
     throw error;
   }
 }
@@ -45,6 +73,69 @@ export async function uploadToS3(props) {
     await publishLog(`❌ Failed to upload to S3: ${error.message}`);
     throw error;
   }
+}
+
+export async function uploadDirectoryToS3(props) {
+  const { bucketName, sourcePath, region, publishLog } = props;
+  
+  await publishLog(`📁 Uploading directory to S3: ${sourcePath} -> ${bucketName}`);
+  
+  if (!fs.existsSync(sourcePath)) {
+    throw new Error(`Source directory does not exist: ${sourcePath}`);
+  }
+  
+  const uploadFile = async (filePath, relativePath) => {
+    const fileContent = fs.readFileSync(filePath);
+    const contentType = getContentType(filePath);
+    
+    await uploadToS3({
+      bucketName,
+      key: relativePath,
+      data: fileContent,
+      contentType,
+      publishLog,
+    });
+  };
+  
+  const uploadDirectory = async (dirPath, relativePath = "") => {
+    const items = fs.readdirSync(dirPath);
+    
+    for (const item of items) {
+      const fullPath = path.join(dirPath, item);
+      const relativeItemPath = relativePath ? path.join(relativePath, item) : item;
+      
+      if (fs.statSync(fullPath).isDirectory()) {
+        await uploadDirectory(fullPath, relativeItemPath);
+      } else {
+        await uploadFile(fullPath, relativeItemPath);
+      }
+    }
+  };
+  
+  await uploadDirectory(sourcePath);
+  await publishLog(`✅ Directory uploaded to S3: ${bucketName}`);
+}
+
+function getContentType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const contentTypes = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.woff': 'font/woff',
+    '.woff2': 'font/woff2',
+    '.ttf': 'font/ttf',
+    '.eot': 'application/vnd.ms-fontobject',
+  };
+  
+  return contentTypes[ext] || 'application/octet-stream';
 }
 
 export async function uploadStaticFiles(props) {

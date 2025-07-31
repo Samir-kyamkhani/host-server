@@ -178,27 +178,7 @@ async function waitForRDSInstanceReady(
   );
 }
 
-export function getDatabaseEnvironmentVariables(props) {
-  const { dbConfig, framework } = props;
 
-  if (framework === "laravel") {
-    return {
-      DB_CONNECTION: dbConfig.database === "mysql" ? "mysql" : "pgsql",
-      DB_HOST: dbConfig.endpoint,
-      DB_PORT: dbConfig.port,
-      DB_DATABASE: dbConfig.database,
-      DB_USERNAME: dbConfig.username,
-      DB_PASSWORD: dbConfig.password,
-    };
-  } else if (framework === "nodejs-prisma" || framework === "nextjs-prisma") {
-    const protocol = dbConfig.database === "mysql" ? "mysql" : "postgresql";
-    return {
-      DATABASE_URL: `${protocol}://${dbConfig.username}:${dbConfig.password}@${dbConfig.endpoint}:${dbConfig.port}/${dbConfig.database}`,
-    };
-  }
-
-  return {};
-}
 
 function generatePassword() {
   return (

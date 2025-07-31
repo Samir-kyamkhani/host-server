@@ -17,11 +17,13 @@ import pkg8 from "@aws-sdk/client-cloudwatch-logs";
 const { CloudWatchLogsClient } = pkg8;
 import pkg9 from "@aws-sdk/client-secrets-manager";
 const { SecretsManagerClient } = pkg9;
+import pkg10 from "@aws-sdk/client-cloudfront";
+const { CloudFrontClient } = pkg10;
 
 dotenv.config({ path: "../../.env" });
 
 export const awsConfig = {
-  region: process.env.AWS_REGION || "us-east-1",
+  region: process.env.AWS_REGION,
   credentials: {
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -39,6 +41,7 @@ let _iamClient = null;
 let _ec2Client = null;
 let _logsClient = null;
 let _secretsClient = null;
+let _cloudfrontClient = null;
 
 export const s3Client = () => {
   if (!_s3Client) _s3Client = new S3Client(awsConfig);
@@ -83,6 +86,11 @@ export const logsClient = () => {
 export const secretsClient = () => {
   if (!_secretsClient) _secretsClient = new SecretsManagerClient(awsConfig);
   return _secretsClient;
+};
+
+export const cloudfrontClient = () => {
+  if (!_cloudfrontClient) _cloudfrontClient = new CloudFrontClient(awsConfig);
+  return _cloudfrontClient;
 };
 
 export const getDeploymentConfig = (props) => ({

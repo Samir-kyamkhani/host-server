@@ -1,19 +1,12 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
+import fs from "fs";
+import { v4 as uuidv4 } from "uuid";
 
-import { awsConfig, validateAWSConfig } from "./aws/aws-config.js";
-import { createECRRepository } from "./aws/aws-ecr.js";
-import { createRDSInstance, getDatabaseEnvironmentVariables } from "./aws/aws-rds.js";
-import { 
-  createECSCluster, 
-  createECSTaskDefinition, 
-  createECSService 
-} from "./aws/aws-ecs.js";
-import { createCompleteLoadBalancerSetup } from "./aws/aws-loadbalancer.js";
-import { buildAndPushDockerImage } from "./utils/docker-builder.js";
-import { createECSLogGroup } from "./aws/aws-cloudwatch.js";
-import { createDatabaseSecret } from "./aws/aws-secrets-manager.js";
+import { AWSServices } from "./aws/aws-services.js";
+import { DeploymentHandler } from "./utils/deployment-handler.js";
+import { FrameworkHandler, detectFrameworkFromFiles } from "./utils/framework-handler.js";
 
 import { 
   publishLog, 
@@ -29,6 +22,7 @@ import {
 } from "./utils/api-communication.js";
 
 dotenv.config({ path: "../.env" });
+dotenv.config({ path: "../../.env" });
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -38,11 +32,24 @@ const PROJECT_ID = process.env.PROJECT_ID;
 const SUBDOMAIN = process.env.SUBDOMAIN;
 const API_BASE_URL = process.env.API_BASE_URL;
 
+// Validate required environment variables
+if (!DEPLOYMENT_ID) {
+  throw new Error("DEPLOYMENT_ID environment variable is required");
+}
+if (!PROJECT_ID) {
+  throw new Error("PROJECT_ID environment variable is required");
+}
+if (!SUBDOMAIN) {
+  throw new Error("SUBDOMAIN environment variable is required");
+}
+
 async function builderServer(projectConfig) {
   let apiCommunication = null;
   
   try {
-    validateAWSConfig();
+    // Initialize AWS Services
+    const awsServices = new AWSServices();
+    awsServices.validateConfig();
     
     const deploymentConfig = generateDeploymentConfig({
       deploymentId: DEPLOYMENT_ID,
@@ -51,6 +58,11 @@ async function builderServer(projectConfig) {
     });
 
     const config = readProjectConfig(projectConfig);
+    
+    // Validate that we have a valid project ID
+    if (!deploymentConfig.projectId) {
+      throw new Error("Project ID is required but not provided");
+    }
     
     const { apiServerUrl, apiKey } = extractAPIServerConfig(config.envVars || []);
     
@@ -72,10 +84,15 @@ async function builderServer(projectConfig) {
       await apiCommunication.sendLog({ message });
     };
 
+    await logPublisher(`🆔 Project ID: ${deploymentConfig.projectId}`);
+    
     await logPublisher("🚀 Builder Server Started");
     await logPublisher(`📋 Project: ${projectConfig.name}`);
+    await logPublisher(`🆔 Project ID: ${deploymentConfig.projectId}`);
     await logPublisher(`🆔 Deployment ID: ${deploymentConfig.deploymentId}`);
     await logPublisher(`🌐 Subdomain: ${deploymentConfig.subdomain}`);
+    await logPublisher(`🔧 Framework: ${config.framework}`);
+    await logPublisher(`🗄️ Database: ${config.database || 'None'}`);
     
     if (apiServerUrl) {
       await logPublisher(`🔗 API Server: ${apiServerUrl}`);
@@ -89,134 +106,148 @@ async function builderServer(projectConfig) {
 
     const outDirPath = path.join(__dirname, "../output");
 
-    await logPublisher("📖 Reading project configuration from API...");
-    await logPublisher(`🧠 Detected framework: ${config.framework}`);
-    await logPublisher(`🗄️ Database: ${config.database}`);
-
-    if (config.buildCommand) {
-      await logPublisher(`🔧 Running build command: ${config.buildCommand}`);
+    // Clone git repository (mandatory)
+    await logPublisher(`📥 Cloning repository from: ${config.gitUrl}`);
+    await logPublisher(`📁 Cloning to directory: ${outDirPath}`);
+    await logPublisher(`🌿 Branch: ${config.gitBranch}`);
+    
+    // Clean output directory if it exists
+    if (fs.existsSync(outDirPath)) {
+      await logPublisher("🧹 Cleaning existing output directory...");
       await runCommand({
-        command: config.buildCommand,
+        command: `rm -rf "${outDirPath}"`,
+        cwd: path.dirname(outDirPath),
+        publishLog: logPublisher,
+      });
+    }
+    
+    // Create output directory
+    fs.mkdirSync(outDirPath, { recursive: true });
+    
+    // Clone the repository
+    await runCommand({
+      command: `git clone "${config.gitUrl}" .`,
+      cwd: outDirPath,
+      publishLog: logPublisher,
+    });
+    
+    // Checkout specific branch if provided
+    if (config.gitBranch && config.gitBranch !== "main") {
+      await logPublisher(`🔄 Checking out branch: ${config.gitBranch}`);
+      await runCommand({
+        command: `git checkout ${config.gitBranch}`,
         cwd: outDirPath,
         publishLog: logPublisher,
       });
     }
+    
+    await logPublisher("✅ Repository cloned successfully");
 
-    await logPublisher("☁️ Provisioning AWS services...");
+    await logPublisher("📖 Reading project configuration...");
+    await logPublisher(`🧠 Detected framework: ${config.framework}`);
+    await logPublisher(`🗄️ Database: ${config.database || 'None'}`);
+    await logPublisher(`🔧 Deployment type: ${config.deploymentType}`);
+    await logPublisher(`📦 Needs database: ${config.needsDatabase ? 'Yes' : 'No'}`);
+    await logPublisher(`⚡ Uses Prisma: ${config.usesPrisma ? 'Yes' : 'No'}`);
+
+    // Auto-detect framework if not specified
+    if (!config.framework || config.framework === "auto") {
+      const detectedFramework = detectFrameworkFromFiles(outDirPath);
+      config.framework = detectedFramework;
+      await logPublisher(`🔍 Auto-detected framework: ${detectedFramework}`);
+    }
+
+    await logPublisher("☁️ Starting deployment process...");
     await apiCommunication.updateDeploymentStatus({ status: 'provisioning' });
 
-    const ecrRepositoryName = `${deploymentConfig.projectId}-repo`;
-    await createECRRepository({
-      repositoryName: ecrRepositoryName,
-      publishLog: logPublisher,
-    });
-
+    // Create database if needed
     let dbConfig = null;
-    if (["laravel", "nodejs-prisma", "nextjs-prisma"].includes(config.framework)) {
-      dbConfig = await createRDSInstance({
-        projectId: deploymentConfig.projectId,
-        framework: config.framework,
-        database: config.database,
-        subnetIds: deploymentConfig.subnetIds,
-        securityGroupIds: deploymentConfig.securityGroupIds,
-        publishLog: logPublisher,
-      });
+    if (config.needsDatabase && config.database && ["mysql", "postgresql"].includes(config.database)) {
+      await logPublisher(`🗄️ Creating ${config.database} database for ${config.framework}...`);
+      
+      try {
+        // Create RDS instance
+        dbConfig = await awsServices.createRDSInstance({
+          projectId: deploymentConfig.projectId,
+          database: config.database,
+          subnetIds: deploymentConfig.subnetIds,
+          securityGroupIds: deploymentConfig.securityGroupIds,
+          publishLog: logPublisher,
+        });
+        
+        // Create database secret
+        await awsServices.createDatabaseSecret({
+          projectId: deploymentConfig.projectId,
+          database: config.database,
+          dbConfig: dbConfig,
+          region: awsServices.getConfig().region,
+          publishLog: logPublisher,
+        });
+        
+        await logPublisher(`✅ ${config.database} database created successfully`);
+      } catch (error) {
+        await logPublisher(`❌ Database creation failed: ${error.message}`);
+        throw error;
+      }
+    } else if (config.needsDatabase && !config.database) {
+      await logPublisher(`⚠️ ${config.framework} requires database but none provided`);
+      throw new Error(`${config.framework} requires database configuration`);
+    } else {
+      await logPublisher(`ℹ️ ${config.framework} doesn't require database, skipping database creation`);
+    }
 
-      const dbEnvVars = getDatabaseEnvironmentVariables({
-        dbConfig,
-        framework: config.framework,
-      });
-      config.environment = { ...config.environment, ...dbEnvVars };
-
-      await createDatabaseSecret({
+    // Create environment secret if environment variables exist
+    if (Object.keys(config.environment || {}).length > 0) {
+      await logPublisher("🔐 Creating environment variables secret...");
+      await logPublisher(`📋 Environment variables: ${Object.keys(config.environment).join(", ")}`);
+      await awsServices.createEnvironmentSecret({
         projectId: deploymentConfig.projectId,
-        dbConfig,
+        environment: config.environment,
+        region: awsServices.getConfig().region,
         publishLog: logPublisher,
       });
     }
 
-    const clusterName = `${deploymentConfig.projectId}-cluster`;
-    await createECSCluster({
-      clusterName,
-      publishLog: logPublisher,
-    });
-
-    await createECSLogGroup({
-      projectId: deploymentConfig.projectId,
-      publishLog: logPublisher,
-    });
-
-    const lbConfig = await createCompleteLoadBalancerSetup({
-      projectId: deploymentConfig.projectId,
-      subnetIds: deploymentConfig.subnetIds,
-      securityGroupIds: deploymentConfig.securityGroupIds,
-      vpcId: deploymentConfig.vpcId,
-      port: config.port,
-      publishLog: logPublisher,
-    });
-
-    await logPublisher("🐳 Building and pushing Docker image...");
+    // Initialize deployment handler
+    const deploymentHandler = new DeploymentHandler(awsServices, deploymentConfig.projectId, logPublisher);
+    
+    await logPublisher("🚀 Starting deployment...");
     await apiCommunication.updateDeploymentStatus({ status: 'building' });
 
-    const imageUri = await buildAndPushDockerImage({
-      projectPath: outDirPath,
-      framework: config.framework,
-      port: config.port,
-      ecrRepositoryName,
-      region: awsConfig.region,
-      publishLog: logPublisher,
-    });
-
-    await logPublisher("🚀 Creating ECS task definition...");
-    const taskDefinitionArn = await createECSTaskDefinition({
-      projectId: deploymentConfig.projectId,
-      imageUri,
-      port: config.port,
-      environment: config.environment,
-      region: awsConfig.region,
-      publishLog: logPublisher,
-    });
-
-    await logPublisher("⚡ Deploying to ECS...");
-    await apiCommunication.updateDeploymentStatus({ status: 'deploying' });
-
-    await createECSService({
-      projectId: deploymentConfig.projectId,
-      clusterName,
-      taskDefinitionArn,
-      targetGroupArn: lbConfig.targetGroupArn,
-      subnetIds: deploymentConfig.subnetIds,
-      securityGroupIds: deploymentConfig.securityGroupIds,
-      port: config.port,
-      publishLog: logPublisher,
-    });
-
-    const uniqueUrl = `http://${lbConfig.dnsName}`;
+    // Deploy the application
+    const deploymentResult = await deploymentHandler.deploy(
+      outDirPath,
+      config.framework,
+      config.database,
+      config.environment
+    );
 
     await logPublisher("🎉 Deployment completed successfully!");
-    await logPublisher(`🌐 Application URL: ${uniqueUrl}`);
+    await logPublisher(`🌐 Application URL: ${deploymentResult.url}`);
 
     await apiCommunication.updateDeploymentStatus({
       status: 'completed',
-      url: uniqueUrl,
+      url: deploymentResult.url,
       framework: config.framework,
       database: dbConfig ? config.database : null
     });
 
     await apiCommunication.updateProjectStatus({
       status: 'deployed',
-      url: uniqueUrl
+      url: deploymentResult.url
     });
 
     await apiCommunication.sendHealthCheck();
 
     return {
       success: true,
-      url: uniqueUrl,
+      url: deploymentResult.url,
       projectId: deploymentConfig.projectId,
       deploymentId: deploymentConfig.deploymentId,
       framework: config.framework,
       database: dbConfig ? config.database : null,
+      deploymentType: deploymentResult.type,
+      ...deploymentResult
     };
 
   } catch (error) {

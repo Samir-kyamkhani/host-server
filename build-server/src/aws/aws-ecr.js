@@ -1,5 +1,5 @@
 import pkg from "@aws-sdk/client-ecr";
-const { CreateRepositoryCommand, PutImageCommand } = pkg;
+const { CreateRepositoryCommand } = pkg;
 import { ecrClient } from "./aws-config.js";
 
 export async function createECRRepository(props) {
@@ -26,27 +26,4 @@ export async function createECRRepository(props) {
   }
 }
 
-export async function pushImageToECR(props) {
-  const { imageTag, repositoryUri, publishLog } = props;
-  
-  await publishLog(`📦 Pushing image to ECR: ${imageTag}`);
-  
-  try {
-    await ecrClient().send(new PutImageCommand({
-      repositoryName: repositoryUri.split('/')[1],
-      imageTag: imageTag,
-    }));
-    
-    await publishLog(`✅ Image pushed to ECR: ${repositoryUri}:${imageTag}`);
-    return `${repositoryUri}:${imageTag}`;
-  } catch (error) {
-    await publishLog(`❌ Failed to push image: ${error.message}`);
-    throw error;
-  }
-}
-
-export function getECRRepositoryUri(props) {
-  const { repositoryName, region } = props;
-  const accountId = process.env.AWS_ACCOUNT_ID || "123456789012";
-  return `${accountId}.dkr.ecr.${region}.amazonaws.com/${repositoryName}`;
-} 
+ 

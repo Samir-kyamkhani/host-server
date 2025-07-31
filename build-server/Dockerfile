@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y \
 RUN curl -sL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get install -y nodejs
 
-# Install Docker CLI
+# Install Docker CLI only (no daemon needed)
 RUN curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg && \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
     apt-get update && \
@@ -48,5 +48,5 @@ RUN dos2unix main.sh deploy.sh && \
 # Install Node.js dependencies
 RUN npm install
 
-# Set entrypoint
+# Set entrypoint to run build server
 ENTRYPOINT ["/home/app/main.sh"]

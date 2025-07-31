@@ -79,7 +79,7 @@ const triggerViaECSTask = async (config) => {
     overrides: {
       containerOverrides: [
         {
-          name: 'builder-server',
+          name: 'build-server',
           environment: [
             {
               name: 'PROJECT_ID',
