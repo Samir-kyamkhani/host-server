@@ -1,5 +1,12 @@
 import pkg from "@aws-sdk/client-s3";
-const { PutObjectCommand, CreateBucketCommand, PutBucketWebsiteCommand } = pkg;
+const { 
+  PutObjectCommand, 
+  CreateBucketCommand, 
+  PutBucketWebsiteCommand,
+  PutBucketPolicyCommand,
+  PutPublicAccessBlockCommand,
+  GetPublicAccessBlockCommand
+} = pkg;
 import { s3Client } from "./aws-config.js";
 import fs from "fs";
 import path from "path";
@@ -28,12 +35,73 @@ export async function createS3Bucket(props) {
   }
 }
 
+export async function disableBlockPublicAccess(props) {
+  const { bucketName, publishLog } = props;
+  
+  await publishLog(`🔓 Disabling block public access for bucket: ${bucketName}`);
+  
+  try {
+    await s3Client().send(new PutPublicAccessBlockCommand({
+      Bucket: bucketName,
+      PublicAccessBlockConfiguration: {
+        BlockPublicAcls: false,
+        IgnorePublicAcls: false,
+        BlockPublicPolicy: false,
+        RestrictPublicBuckets: false
+      }
+    }));
+    
+    await publishLog(`✅ Block public access disabled for: ${bucketName}`);
+  } catch (error) {
+    await publishLog(`❌ Failed to disable block public access: ${error.message}`);
+    throw error;
+  }
+}
+
+export async function addBucketPolicy(props) {
+  const { bucketName, publishLog } = props;
+  
+  await publishLog(`📋 Adding bucket policy for public read access: ${bucketName}`);
+  
+  const bucketPolicy = {
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Sid: "PublicReadGetObject",
+        Effect: "Allow",
+        Principal: "*",
+        Action: "s3:GetObject",
+        Resource: `arn:aws:s3:::${bucketName}/*`
+      }
+    ]
+  };
+  
+  try {
+    await s3Client().send(new PutBucketPolicyCommand({
+      Bucket: bucketName,
+      Policy: JSON.stringify(bucketPolicy)
+    }));
+    
+    await publishLog(`✅ Bucket policy added for: ${bucketName}`);
+  } catch (error) {
+    await publishLog(`❌ Failed to add bucket policy: ${error.message}`);
+    throw error;
+  }
+}
+
 export async function configureS3StaticHosting(props) {
   const { bucketName, region, publishLog } = props;
   
   await publishLog(`🌐 Configuring S3 bucket for static website hosting: ${bucketName}`);
   
   try {
+    // First disable block public access
+    await disableBlockPublicAccess({ bucketName, publishLog });
+    
+    // Add bucket policy for public read access
+    await addBucketPolicy({ bucketName, publishLog });
+    
+    // Configure website hosting
     await s3Client().send(new PutBucketWebsiteCommand({
       Bucket: bucketName,
       WebsiteConfiguration: {

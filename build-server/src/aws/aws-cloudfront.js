@@ -41,9 +41,11 @@ export async function createCloudFrontDistribution(props) {
       Items: [
         {
           Id: bucketName,
-          DomainName: `${bucketName}.s3.amazonaws.com`,
-          S3OriginConfig: {
-            OriginAccessIdentity: "",
+          DomainName: `${bucketName}.s3-website.${process.env.AWS_REGION || 'ap-south-1'}.amazonaws.com`,
+          CustomOriginConfig: {
+            HTTPPort: 80,
+            HTTPSPort: 443,
+            OriginProtocolPolicy: "http-only",
           },
         },
       ],

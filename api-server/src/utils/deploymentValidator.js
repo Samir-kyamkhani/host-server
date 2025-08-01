@@ -25,7 +25,7 @@ const validateDeploymentRequest = (data) => {
   }
 
   // Validate framework
-  const supportedFrameworks = ['node', 'nextjs', 'nextjs-prisma', 'laravel', 'static'];
+  const supportedFrameworks = ['node', 'vite', 'nextjs', 'nextjs-prisma', 'laravel', 'static'];
   if (!supportedFrameworks.includes(data.framework)) {
     errors.push(`Unsupported framework. Supported: ${supportedFrameworks.join(', ')}`);
   }

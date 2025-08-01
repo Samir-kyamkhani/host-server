@@ -132,10 +132,13 @@ export async function updateDeploymentStatus(props) {
 }
 
 export function runCommand(props) {
-  const { command, cwd, publishLog } = props;
+  const { command, cwd, publishLog, env } = props;
   
   return new Promise((resolve, reject) => {
-    const proc = exec(command, { cwd });
+    const proc = exec(command, { 
+      cwd,
+      env: env ? { ...process.env, ...env } : process.env
+    });
 
     proc.stdout.on("data", async (data) => {
       await publishLog(data.toString().trim());

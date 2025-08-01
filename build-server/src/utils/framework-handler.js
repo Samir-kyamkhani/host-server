@@ -1,14 +1,54 @@
 import path from "path";
 import fs from "fs";
 import { runCommand } from "./utils.js";
+import { getDatabaseCredentials } from "../aws/aws-secrets-manager.js";
 
 // Framework-specific deployment handlers
 export class FrameworkHandler {
-  constructor(projectPath, framework, database, publishLog) {
+  constructor(projectPath, framework, database, publishLog, projectId) {
     this.projectPath = projectPath;
     this.framework = framework;
     this.database = database;
     this.publishLog = publishLog;
+    this.projectId = projectId;
+  }
+
+  // Helper method to get database URL from AWS Secrets Manager
+  async getDatabaseUrl() {
+    if (!this.database || !this.projectId) {
+      return null;
+    }
+
+    try {
+      await this.publishLog(`🔐 Retrieving database credentials for ${this.database}...`);
+      const credentials = await getDatabaseCredentials({
+        projectId: this.projectId,
+        database: this.database,
+        publishLog: this.publishLog
+      });
+
+      if (!credentials) {
+        await this.publishLog(`⚠️ No database credentials found for ${this.database}`);
+        return null;
+      }
+
+      // Construct DATABASE_URL based on database type
+      let databaseUrl;
+      if (this.database === 'mysql') {
+        databaseUrl = `mysql://${credentials.username}:${credentials.password}@${credentials.host}:${credentials.port}/${credentials.database}`;
+      } else if (this.database === 'postgresql') {
+        databaseUrl = `postgresql://${credentials.username}:${credentials.password}@${credentials.host}:${credentials.port}/${credentials.database}`;
+      } else {
+        await this.publishLog(`⚠️ Unsupported database type: ${this.database}`);
+        return null;
+      }
+
+      await this.publishLog(`✅ Database URL constructed for ${this.database}`);
+      return databaseUrl;
+    } catch (error) {
+      await this.publishLog(`❌ Failed to retrieve database credentials: ${error.message}`);
+      return null;
+    }
   }
 
   // Laravel Fullstack Handler
@@ -93,17 +133,51 @@ export class FrameworkHandler {
     // Handle Prisma if database is configured
     if (this.database && this.usesPrisma()) {
       await this.publishLog("🗄️ Setting up Prisma database...");
+      
+      // Get database URL from AWS Secrets Manager
+      const databaseUrl = await this.getDatabaseUrl();
+      
+      if (databaseUrl) {
+        // Set DATABASE_URL environment variable for Prisma commands
+        process.env.DATABASE_URL = databaseUrl;
+        await this.publishLog("🔗 DATABASE_URL environment variable set for Prisma");
+      } else {
+        await this.publishLog("⚠️ No DATABASE_URL available, skipping Prisma setup");
+        return {
+          type: "nextjs",
+          port: 3000,
+          startCommand: "npm start",
+          needsDatabase: false,
+          buildOutput: this.projectPath,
+        };
+      }
+      
       await runCommand({
         command: "npx prisma generate",
         cwd: this.projectPath,
         publishLog: this.publishLog,
+        env: { ...process.env, DATABASE_URL: databaseUrl }
       });
       
-      await runCommand({
-        command: "npx prisma migrate deploy",
-        cwd: this.projectPath,
-        publishLog: this.publishLog,
-      });
+      // Check if migrations directory exists
+      const migrationsDir = path.join(this.projectPath, "prisma", "migrations");
+      if (fs.existsSync(migrationsDir)) {
+        await this.publishLog("📋 Found migrations directory, running migrations...");
+        await runCommand({
+          command: "npx prisma migrate deploy",
+          cwd: this.projectPath,
+          publishLog: this.publishLog,
+          env: { ...process.env, DATABASE_URL: databaseUrl }
+        });
+      } else {
+        await this.publishLog("📋 No migrations found, creating initial schema...");
+        await runCommand({
+          command: "npx prisma db push",
+          cwd: this.projectPath,
+          publishLog: this.publishLog,
+          env: { ...process.env, DATABASE_URL: databaseUrl }
+        });
+      }
     }
 
     // Build Next.js application
@@ -141,17 +215,51 @@ export class FrameworkHandler {
     // Handle Prisma if database is configured
     if (this.database && this.usesPrisma()) {
       await this.publishLog("🗄️ Setting up Prisma database...");
+      
+      // Get database URL from AWS Secrets Manager
+      const databaseUrl = await this.getDatabaseUrl();
+      
+      if (databaseUrl) {
+        // Set DATABASE_URL environment variable for Prisma commands
+        process.env.DATABASE_URL = databaseUrl;
+        await this.publishLog("🔗 DATABASE_URL environment variable set for Prisma");
+      } else {
+        await this.publishLog("⚠️ No DATABASE_URL available, skipping Prisma setup");
+        return {
+          type: "nodejs",
+          port: 3000,
+          startCommand: "npm start",
+          needsDatabase: false,
+          buildOutput: this.projectPath,
+        };
+      }
+      
       await runCommand({
         command: "npx prisma generate",
         cwd: this.projectPath,
         publishLog: this.publishLog,
+        env: { ...process.env, DATABASE_URL: databaseUrl }
       });
       
-      await runCommand({
-        command: "npx prisma migrate deploy",
-        cwd: this.projectPath,
-        publishLog: this.publishLog,
-      });
+      // Check if migrations directory exists
+      const migrationsDir = path.join(this.projectPath, "prisma", "migrations");
+      if (fs.existsSync(migrationsDir)) {
+        await this.publishLog("📋 Found migrations directory, running migrations...");
+        await runCommand({
+          command: "npx prisma migrate deploy",
+          cwd: this.projectPath,
+          publishLog: this.publishLog,
+          env: { ...process.env, DATABASE_URL: databaseUrl }
+        });
+      } else {
+        await this.publishLog("📋 No migrations found, creating initial schema...");
+        await runCommand({
+          command: "npx prisma db push",
+          cwd: this.projectPath,
+          publishLog: this.publishLog,
+          env: { ...process.env, DATABASE_URL: databaseUrl }
+        });
+      }
     }
 
     // Check if this is a Prisma-specific Node.js app
@@ -195,15 +303,26 @@ export class FrameworkHandler {
       publishLog: this.publishLog,
     });
 
-    // Create .env file for Vite if environment variables exist
+    // Create .env file for Vite with environment variables
     const envPath = path.join(this.projectPath, ".env");
-    if (!fs.existsSync(envPath)) {
-      await this.publishLog("📝 Creating .env file for Vite...");
-      fs.writeFileSync(envPath, "# Environment variables for Vite build\n");
+    await this.publishLog("📝 Creating .env file for Vite with environment variables...");
+    
+    // Get environment variables from the deployment
+    const envVars = process.env.ENV_VARS ? JSON.parse(process.env.ENV_VARS) : [];
+    let envContent = "# Environment variables for Vite build\n";
+    
+    if (envVars && envVars.length > 0) {
+      await this.publishLog(`🔧 Injecting ${envVars.length} environment variables...`);
+      for (const envVar of envVars) {
+        envContent += `${envVar.key}=${envVar.value}\n`;
+        await this.publishLog(`  - ${envVar.key}=${envVar.value}`);
+      }
     }
+    
+    fs.writeFileSync(envPath, envContent);
 
-    // Build Vite application
-    await this.publishLog("🔨 Building Vite application...");
+    // Build Vite application with environment variables
+    await this.publishLog("🔨 Building Vite application with environment variables...");
     await runCommand({
       command: "npm run build",
       cwd: this.projectPath,

@@ -219,7 +219,11 @@ async function builderServer(projectConfig) {
       outDirPath,
       config.framework,
       config.database,
-      config.environment
+      config.environment,
+      deploymentConfig.subnetIds,
+      deploymentConfig.securityGroupIds,
+      deploymentConfig.vpcId,
+      config.gitUrl
     );
 
     await logPublisher("🎉 Deployment completed successfully!");

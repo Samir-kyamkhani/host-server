@@ -3,8 +3,9 @@ export {
   validateAWSConfig
 } from './aws-config.js';
 
-export { 
-  createECRRepository
+export {
+  createECRRepository,
+  buildAndPushDockerImage
 } from './aws-ecr.js';
 
 export { 
@@ -18,13 +19,18 @@ export {
 } from './aws-ecs.js';
 
 export { 
-  createCompleteLoadBalancerSetup
+  createCompleteLoadBalancerSetup,
+  checkTargetGroupHealth,
+  checkLoadBalancerStatus,
+  waitForHealthyTargets
 } from './aws-loadbalancer.js';
 
 export { 
   createS3Bucket,
   configureS3StaticHosting,
-  uploadDirectoryToS3
+  uploadDirectoryToS3,
+  disableBlockPublicAccess,
+  addBucketPolicy
 } from './aws-s3.js';
 
 export { 

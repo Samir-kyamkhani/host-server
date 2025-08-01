@@ -1,6 +1,7 @@
 import {
   // ECR
   createECRRepository,
+  buildAndPushDockerImage,
   
   // RDS
   createRDSInstance,
@@ -44,9 +45,14 @@ export class AWSServices {
     return await createECRRepository(props);
   }
 
+  async buildAndPushDockerImage(props) {
+    return await buildAndPushDockerImage(props);
+  }
+
   async getECRLoginCommand() {
     const { ecrClient } = await import('./aws-config.js');
-    const { GetAuthorizationTokenCommand } = await import('@aws-sdk/client-ecr');
+    const ecrPkg = await import('@aws-sdk/client-ecr');
+    const { GetAuthorizationTokenCommand } = ecrPkg;
     
     try {
       const result = await ecrClient().send(new GetAuthorizationTokenCommand({}));
@@ -82,6 +88,21 @@ export class AWSServices {
     return await createCompleteLoadBalancerSetup(props);
   }
 
+  async checkTargetGroupHealth(targetGroupArn, publishLog) {
+    const { checkTargetGroupHealth } = await import('./aws-loadbalancer.js');
+    return await checkTargetGroupHealth(targetGroupArn, publishLog);
+  }
+
+  async checkLoadBalancerStatus(loadBalancerArn, publishLog) {
+    const { checkLoadBalancerStatus } = await import('./aws-loadbalancer.js');
+    return await checkLoadBalancerStatus(loadBalancerArn, publishLog);
+  }
+
+  async waitForHealthyTargets(targetGroupArn, publishLog, maxAttempts) {
+    const { waitForHealthyTargets } = await import('./aws-loadbalancer.js');
+    return await waitForHealthyTargets(targetGroupArn, publishLog, maxAttempts);
+  }
+
   // S3 Methods
   async createS3Bucket(props) {
     return await createS3Bucket(props);
@@ -93,6 +114,16 @@ export class AWSServices {
 
   async uploadDirectoryToS3(props) {
     return await uploadDirectoryToS3(props);
+  }
+
+  async disableBlockPublicAccess(props) {
+    const { disableBlockPublicAccess } = await import('./aws-s3.js');
+    return await disableBlockPublicAccess(props);
+  }
+
+  async addBucketPolicy(props) {
+    const { addBucketPolicy } = await import('./aws-s3.js');
+    return await addBucketPolicy(props);
   }
 
   // CloudWatch Methods

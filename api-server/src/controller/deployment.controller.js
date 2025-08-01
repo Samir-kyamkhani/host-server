@@ -33,7 +33,7 @@ const createProject = asyncHandler(async (req, res) => {
     const userPlan = userSubscription?.plan || 'FREE';
 
     if (userPlan === 'FREE' && projectCount >= 2) {
-      return ApiError.send(res, 403, 'Free plan limited to 1 project. Upgrade to create more projects.');
+      return ApiError.send(res, 403, 'Free plan limited to 2 project. Upgrade to create more projects.');
     }
 
     if (userPlan === 'STARTER' && projectCount >= 5) {
@@ -118,11 +118,11 @@ const createProject = asyncHandler(async (req, res) => {
     });
 
     // Send notification to user
-    await notificationService.sendDeploymentStarted({
-      userId,
-      projectName: name,
-      deploymentId: deployment.id
-    });
+    // await notificationService.sendDeploymentStarted({
+    //   userId,
+    //   projectName: name,
+    //   deploymentId: deployment.id
+    // });
 
     return res.status(201).json(
       ApiResponse.success(

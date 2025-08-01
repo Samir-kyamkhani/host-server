@@ -28,5 +28,10 @@ echo "📋 Project ID: $PROJECT_ID"
 echo "🆔 Deployment ID: $DEPLOYMENT_ID"
 echo "🌐 Subdomain: $SUBDOMAIN"
 
+# Use daemon-less approach with buildx
+echo "🐳 Using daemon-less buildx approach..."
+mkdir -p /var/run/docker
+echo "✅ Buildx environment ready"
+
 echo "🔧 Running builder server..."
 node src/script.js 

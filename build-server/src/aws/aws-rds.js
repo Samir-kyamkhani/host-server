@@ -81,7 +81,7 @@ export async function createRDSInstance(props) {
         port: result.DBInstance.Endpoint.Port,
         username: "admin",
         password: dbConfig.MasterUserPassword,
-        database: database === "mysql" ? "app" : "postgres",
+        database: projectId, // Use project ID as database name to avoid conflicts
       };
     } else {
       // If endpoint not available, wait for instance to be ready
@@ -90,7 +90,8 @@ export async function createRDSInstance(props) {
         dbInstanceIdentifier,
         dbConfig.MasterUserPassword,
         database,
-        publishLog
+        publishLog,
+        projectId
       );
     }
   } catch (error) {
@@ -102,7 +103,8 @@ export async function createRDSInstance(props) {
         dbInstanceIdentifier,
         "placeholder",
         database,
-        publishLog
+        publishLog,
+        projectId
       );
     }
     throw error;
@@ -114,9 +116,10 @@ async function waitForRDSInstanceReady(
   instanceIdentifier,
   password,
   database,
-  publishLog
+  publishLog,
+  projectId
 ) {
-  const maxAttempts = 30; // 5 minutes max wait
+  const maxAttempts = 60; // 10 minutes max wait (RDS can take time with backups)
   const delayMs = 10000; // 10 seconds between checks
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -134,18 +137,27 @@ async function waitForRDSInstanceReady(
       const dbInstance = result.DBInstances[0];
 
       if (dbInstance && dbInstance.Endpoint && dbInstance.Endpoint.Address) {
-        await publishLog(`✅ RDS instance is ready!`);
-        await publishLog(
-          `📊 Database endpoint: ${dbInstance.Endpoint.Address}`
-        );
+        // Check if instance is fully ready (not just available, but also ready for connections)
+        if (dbInstance.DBInstanceStatus === "available" && 
+            (!dbInstance.PendingModifiedValues || Object.keys(dbInstance.PendingModifiedValues).length === 0)) {
+          await publishLog(`✅ RDS instance is ready!`);
+          await publishLog(
+            `📊 Database endpoint: ${dbInstance.Endpoint.Address}`
+          );
 
-        return {
-          endpoint: dbInstance.Endpoint.Address,
-          port: dbInstance.Endpoint.Port,
-          username: "admin",
-          password: password,
-          database: database === "mysql" ? "app" : "postgres",
-        };
+          return {
+            endpoint: dbInstance.Endpoint.Address,
+            port: dbInstance.Endpoint.Port,
+            username: "admin",
+            password: password,
+            database: projectId, // Use project ID as database name to avoid conflicts
+          };
+        } else if (dbInstance.DBInstanceStatus === "available") {
+          // Instance is available but might still be processing (backup, etc.)
+          await publishLog(
+            `ℹ️ RDS instance is available but still processing (backup, etc.): ${dbInstance.DBInstanceStatus}`
+          );
+        }
       }
 
       if (dbInstance && dbInstance.DBInstanceStatus === "available") {
