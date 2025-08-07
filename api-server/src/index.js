@@ -22,7 +22,7 @@ async function startServer() {
     
     const server = app.listen(PORT, () => {
       console.log(`🚀 Server running on http://localhost:${PORT}`);
-      console.log(`📊 Health check available at http://localhost:${PORT}/api/v1/deployments/health`);
+      console.log(`📊 Health check available at http://localhost:${PORT}/api/v1/health`);
     });
 
     // Graceful shutdown
