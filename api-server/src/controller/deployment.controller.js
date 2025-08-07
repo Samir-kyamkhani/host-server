@@ -32,8 +32,8 @@ const createProject = asyncHandler(async (req, res) => {
     // Default to FREE plan if no subscription exists
     const userPlan = userSubscription?.plan || 'FREE';
 
-    if (userPlan === 'FREE' && projectCount >= 2) {
-      return ApiError.send(res, 403, 'Free plan limited to 2 project. Upgrade to create more projects.');
+    if (userPlan === 'FREE' && projectCount >= 3) {
+      return ApiError.send(res, 403, 'Free plan limited to 3 project. Upgrade to create more projects.');
     }
 
     if (userPlan === 'STARTER' && projectCount >= 5) {
