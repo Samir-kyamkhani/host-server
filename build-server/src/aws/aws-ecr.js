@@ -2,20 +2,31 @@ import pkg from "@aws-sdk/client-ecr";
 const { CreateRepositoryCommand, GetAuthorizationTokenCommand } = pkg;
 import { ecrClient } from "../config/aws-config.js";
 import { runCommand } from "../utils/utils.js";
+import fs from "fs/promises";
+import path from "path";
 
-export async function createECRRepository(props) {
-  const { repositoryName, publishLog } = props;
-  
+export async function createECRRepository({ repositoryName, publishLog }) {
+  if (!repositoryName) throw new Error("Repository name is required");
+  if (!publishLog) throw new Error("Logging function is required");
+
   await publishLog(`🏗️ Creating ECR repository: ${repositoryName}`);
-  
+
   try {
-    await ecrClient().send(new CreateRepositoryCommand({
-      repositoryName,
-      imageScanningConfiguration: {
-        scanOnPush: true,
-      },
-    }));
-    
+    await ecrClient().send(
+      new CreateRepositoryCommand({
+        repositoryName,
+        imageScanningConfiguration: {
+          scanOnPush: true,
+        },
+        tags: [
+          {
+            Key: "CreatedBy",
+            Value: "build-server",
+          },
+        ],
+      })
+    );
+
     await publishLog(`✅ ECR repository created: ${repositoryName}`);
     return repositoryName;
   } catch (error) {
@@ -23,37 +34,34 @@ export async function createECRRepository(props) {
       await publishLog(`ℹ️ ECR repository already exists: ${repositoryName}`);
       return repositoryName;
     }
+    await publishLog(`❌ Failed to create ECR repository: ${error.message}`);
     throw error;
   }
 }
 
-export async function getECRLoginToken(props) {
-  const { publishLog } = props;
-  
+export async function getECRLoginToken({ publishLog }) {
+  if (!publishLog) throw new Error("Logging function is required");
+
   await publishLog(`🔐 Getting ECR login token...`);
-  
+
   try {
     const result = await ecrClient().send(new GetAuthorizationTokenCommand({}));
     const token = result.authorizationData[0].authorizationToken;
     const proxyEndpoint = result.authorizationData[0].proxyEndpoint;
-    
-    // Extract the registry endpoint from the proxy endpoint (remove /v2/ if present)
-    // Also ensure we're using the correct format for Docker login
-    let endpoint = proxyEndpoint.replace('/v2/', '');
-    
-    // If the endpoint still contains /v2/, try a different approach
-    if (endpoint.includes('/v2/')) {
-      endpoint = endpoint.replace('/v2/', '');
+
+    // Normalize endpoint URL
+    let endpoint = proxyEndpoint
+      .replace(/^https?:\/\//, "")
+      .replace(/\/v2\/?$/, "");
+
+    // Fallback to default endpoint if format is incorrect
+    if (!endpoint.includes("dkr.ecr.")) {
+      endpoint = `${process.env.AWS_ACCOUNT_ID}.dkr.ecr.${
+        process.env.AWS_REGION || "ap-south-1"
+      }.amazonaws.com`;
     }
-    
-    // Ensure we have the correct ECR registry format
-    if (!endpoint.includes('dkr.ecr.')) {
-      endpoint = `${process.env.AWS_ACCOUNT_ID}.dkr.ecr.${process.env.AWS_REGION || "ap-south-1"}.amazonaws.com`;
-    }
-    
+
     await publishLog(`✅ ECR login token obtained`);
-    await publishLog(`🔍 Debug: Original proxy endpoint: ${proxyEndpoint}`);
-    await publishLog(`🔍 Debug: Cleaned endpoint: ${endpoint}`);
     return { token, endpoint };
   } catch (error) {
     await publishLog(`❌ Failed to get ECR login token: ${error.message}`);
@@ -61,47 +69,47 @@ export async function getECRLoginToken(props) {
   }
 }
 
-export async function buildAndPushDockerImage(props) {
-  const { 
-    projectId, 
-    projectPath, 
-    framework, 
-    region, 
-    publishLog 
-  } = props;
-  
+export async function buildAndPushDockerImage({
+  projectId,
+  projectPath,
+  framework,
+  region,
+  publishLog,
+}) {
+  if (!projectId || !projectPath || !framework || !region || !publishLog) {
+    throw new Error("Missing required parameters");
+  }
+
   const repositoryName = `${projectId}-app`;
   const imageTag = `${repositoryName}:latest`;
-  const ecrUri = `${process.env.AWS_ACCOUNT_ID || "133489485418"}.dkr.ecr.${region}.amazonaws.com`;
+  const ecrUri = `${
+    process.env.AWS_ACCOUNT_ID || "133489485418"
+  }.dkr.ecr.${region}.amazonaws.com`;
   const fullImageUri = `${ecrUri}/${imageTag}`;
-  
+
   await publishLog(`🐳 Building Docker image for ${framework}...`);
-  
+
   try {
     // Create ECR repository
     await createECRRepository({ repositoryName, publishLog });
-    
+
     // Get ECR login token
     const { token, endpoint } = await getECRLoginToken({ publishLog });
-    
+
     // Get the base image for the framework
-    const baseImage = getBaseImageForFramework(framework);
+    const baseImage = await getBaseImageForFramework(projectPath);
     await publishLog(`📦 Using base image: ${baseImage}`);
-    
-    // Create a simple Dockerfile that includes application code
-    const simpleDockerfile = `FROM ${baseImage}
+
+    // Create Dockerfile
+    const dockerfileContent = `FROM ${baseImage}
 WORKDIR /app
 COPY . .
 RUN npm ci --only=production
 EXPOSE 3000
 CMD ["npm", "start"]`;
-    
-    await runCommand({
-      command: `echo '${simpleDockerfile}' > Dockerfile`,
-      cwd: projectPath,
-      publishLog,
-    });
-    
+
+    await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfileContent);
+
     // Login to ECR
     await publishLog(`🔐 Logging into ECR...`);
     await runCommand({
@@ -109,99 +117,77 @@ CMD ["npm", "start"]`;
       cwd: projectPath,
       publishLog,
     });
-    
-    // Try to build using docker build with --no-cache
+
+    // Build and push image
     try {
-      await publishLog(`🏗️ Attempting Docker build with --no-cache...`);
+      await publishLog(`🏗️ Building Docker image...`);
       await runCommand({
         command: `docker build --no-cache -t ${fullImageUri} .`,
         cwd: projectPath,
         publishLog,
       });
-      
+
+      await publishLog(`📤 Pushing Docker image...`);
       await runCommand({
         command: `docker push ${fullImageUri}`,
         cwd: projectPath,
         publishLog,
       });
-      
-      await publishLog(`✅ Custom Docker image built and pushed: ${fullImageUri}`);
+
+      await publishLog(`✅ Image pushed: ${fullImageUri}`);
       return fullImageUri;
     } catch (dockerError) {
-      await publishLog(`⚠️ Docker build failed, using base image with application code injection...`);
-      
-      // Since Docker daemon is not available, we'll use a different approach
-      // Create a custom image URI that includes the application code
-      await publishLog(`📦 Using base image with application code: ${baseImage}`);
-      
-      // Return a special URI that indicates we need to handle application code injection
+      await publishLog(`⚠️ Docker build failed: ${dockerError.message}`);
+      await publishLog(`🔄 Falling back to base image with code injection`);
       return `${baseImage}-with-app-code`;
     }
-    
   } catch (error) {
     await publishLog(`❌ Docker build failed: ${error.message}`);
     throw error;
   }
 }
 
-function generateDockerfile(framework) {
-  switch (framework) {
-    case "nodejs":
-    case "nodejs-prisma":
-      return `FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]`;
-      
-    case "nextjs":
-    case "nextjs-prisma":
-      return `FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 3000
-CMD ["npm", "start"]`;
-      
-    case "laravel":
-      return `FROM php:8.2-fpm-alpine
-RUN apk add --no-cache nginx
-WORKDIR /var/www/html
-COPY . .
-RUN composer install --no-dev --optimize-autoloader
-RUN chown -R www-data:www-data /var/www/html
-EXPOSE 80
-CMD ["php", "artisan", "serve", "--host=0.0.0.0", "--port=80"]`;
-      
-    default:
-      return `FROM node:18-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-EXPOSE 3000
-CMD ["npm", "start"]`;
-  }
-}
+async function getBaseImageForFramework(projectPath) {
+  const DEFAULT_NODE_IMAGE = "node:22-alpine";
 
-function getBaseImageForFramework(framework) {
-  switch (framework) {
-    case "nodejs":
-    case "nodejs-prisma":
-      return "node:18-alpine";
-      
-    case "nextjs":
-    case "nextjs-prisma":
-      return "node:18-alpine";
-      
-    case "laravel":
-      return "php:8.2-fpm-alpine";
-      
-    default:
-      return "node:18-alpine";
+  try {
+    const pkgPath = path.join(projectPath, "package.json");
+    const pkgData = await fs.readFile(pkgPath, "utf-8");
+    const pkgJson = JSON.parse(pkgData);
+
+    // Check for engines.node first
+    if (pkgJson.engines?.node) {
+      const versionSpecifier = pkgJson.engines.node;
+
+      const versionMatch = versionSpecifier.match(/(\d+)(?:\.\d+)?(?:\.\d+)?/);
+
+      if (versionMatch) {
+        const majorVersion = versionMatch[1];
+
+        if (/^\d+$/.test(majorVersion)) {
+          const ltsVersion =
+            Number(majorVersion) % 2 === 0
+              ? majorVersion
+              : Math.max(16, Number(majorVersion) - 1);
+
+          return `node:${ltsVersion}-alpine`;
+        }
+      }
+    }
+
+    if (pkgJson.version) {
+      const versionMatch = pkgJson.version.match(/^(\d+)\./);
+      if (versionMatch) {
+        return `node:${versionMatch[1]}-alpine`;
+      }
+    }
+
+    return DEFAULT_NODE_IMAGE;
+  } catch (err) {
+    console.warn(
+      `⚠️ Using default Node.js image (${DEFAULT_NODE_IMAGE}) due to:`,
+      err.message
+    );
+    return DEFAULT_NODE_IMAGE;
   }
 }
