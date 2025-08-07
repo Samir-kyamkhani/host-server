@@ -1,6 +1,6 @@
 import pkg from "@aws-sdk/client-secrets-manager";
 const { CreateSecretCommand, GetSecretValueCommand } = pkg;
-import { secretsClient } from "./aws-config.js";
+import { secretsClient } from "../config/aws-config.js";
 
 export async function createDatabaseSecret(props) {
   const { projectId, database, dbConfig, region, publishLog } = props;

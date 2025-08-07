@@ -22,9 +22,8 @@ build-server/
 │   │   ├── utils.js           # Common utilities
 │   │   ├── docker-builder.js  # Docker operations
 │   │   └── api-communication.js # API server communication
-│   └── script.js              # Main deployment script
-├── main.sh                    # Main automation script
-├── deploy.sh                  # Deployment script with API integration
+│   └── main.js              # Main deployment main
+├── main.sh                    # Main automation main
 ├── package.json               # Dependencies & scripts
 ├── Dockerfile                 # Container configuration
 ├── .dockerignore             # Docker ignore rules

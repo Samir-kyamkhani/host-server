@@ -2,37 +2,37 @@ import {
   // ECR
   createECRRepository,
   buildAndPushDockerImage,
-  
+
   // RDS
   createRDSInstance,
-  
+
   // ECS
   createECSCluster,
   createECSTaskDefinition,
   createECSService,
-  
+
   // Load Balancer
   createCompleteLoadBalancerSetup,
-  
+
   // S3
   createS3Bucket,
   configureS3StaticHosting,
   uploadDirectoryToS3,
-  
+
   // CloudWatch
   createECSLogGroup,
-  
+
   // Secrets Manager
   createDatabaseSecret,
   createEnvironmentSecret,
-  
+
   // CloudFront
   createCloudFrontDistribution,
-  
+
   // Config
   awsConfig,
-  validateAWSConfig
-} from './index.js';
+  validateAWSConfig,
+} from "../index.js";
 
 // AWS Services wrapper class
 export class AWSServices {
@@ -50,15 +50,17 @@ export class AWSServices {
   }
 
   async getECRLoginCommand() {
-    const { ecrClient } = await import('./aws-config.js');
-    const ecrPkg = await import('@aws-sdk/client-ecr');
+    const { ecrClient } = await import("../config/aws-config.js");
+    const ecrPkg = await import("@aws-sdk/client-ecr");
     const { GetAuthorizationTokenCommand } = ecrPkg;
-    
+
     try {
-      const result = await ecrClient().send(new GetAuthorizationTokenCommand({}));
+      const result = await ecrClient().send(
+        new GetAuthorizationTokenCommand({})
+      );
       const token = result.authorizationData[0].authorizationToken;
       const endpoint = result.authorizationData[0].proxyEndpoint;
-      
+
       return `echo "${token}" | docker login --username AWS --password-stdin ${endpoint}`;
     } catch (error) {
       throw new Error(`Failed to get ECR login command: ${error.message}`);
@@ -89,17 +91,23 @@ export class AWSServices {
   }
 
   async checkTargetGroupHealth(targetGroupArn, publishLog) {
-    const { checkTargetGroupHealth } = await import('./aws-loadbalancer.js');
+    const { checkTargetGroupHealth } = await import(
+      "../aws/aws-loadbalancer.js"
+    );
     return await checkTargetGroupHealth(targetGroupArn, publishLog);
   }
 
   async checkLoadBalancerStatus(loadBalancerArn, publishLog) {
-    const { checkLoadBalancerStatus } = await import('./aws-loadbalancer.js');
+    const { checkLoadBalancerStatus } = await import(
+      "../aws/aws-loadbalancer.js"
+    );
     return await checkLoadBalancerStatus(loadBalancerArn, publishLog);
   }
 
   async waitForHealthyTargets(targetGroupArn, publishLog, maxAttempts) {
-    const { waitForHealthyTargets } = await import('./aws-loadbalancer.js');
+    const { waitForHealthyTargets } = await import(
+      "../aws/aws-loadbalancer.js"
+    );
     return await waitForHealthyTargets(targetGroupArn, publishLog, maxAttempts);
   }
 
@@ -117,12 +125,12 @@ export class AWSServices {
   }
 
   async disableBlockPublicAccess(props) {
-    const { disableBlockPublicAccess } = await import('./aws-s3.js');
+    const { disableBlockPublicAccess } = await import("../aws/aws-s3.js");
     return await disableBlockPublicAccess(props);
   }
 
   async addBucketPolicy(props) {
-    const { addBucketPolicy } = await import('./aws-s3.js');
+    const { addBucketPolicy } = await import("../aws/aws-s3.js");
     return await addBucketPolicy(props);
   }
 
@@ -153,4 +161,4 @@ export class AWSServices {
   validateConfig() {
     return validateAWSConfig();
   }
-} 
+}

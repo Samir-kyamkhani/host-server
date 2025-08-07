@@ -4,7 +4,7 @@ const {
   CreateDBSubnetGroupCommand,
   DescribeDBInstancesCommand,
 } = pkg;
-import { rdsClient } from "./aws-config.js";
+import { rdsClient } from "../config/aws-config.js";
 
 export async function createRDSInstance(props) {
   const {

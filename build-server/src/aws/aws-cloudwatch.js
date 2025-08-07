@@ -1,6 +1,6 @@
 import pkg from "@aws-sdk/client-cloudwatch-logs";
 const { CreateLogGroupCommand } = pkg;
-import { logsClient } from "./aws-config.js";
+import { logsClient } from "../config/aws-config.js";
 
 export async function createECSLogGroup(props) {
   const { projectId, taskDefinitionName, region, publishLog } = props;

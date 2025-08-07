@@ -1,6 +1,6 @@
 import pkg from "@aws-sdk/client-elastic-load-balancing-v2";
 const { CreateLoadBalancerCommand, CreateTargetGroupCommand, CreateListenerCommand, DescribeTargetHealthCommand, DescribeLoadBalancersCommand } = pkg;
-import { elbClient } from "./aws-config.js";
+import { elbClient } from "../config/aws-config.js";
 
 export async function createLoadBalancer(props) {
   const { projectId, subnetIds, securityGroupIds, publishLog } = props;

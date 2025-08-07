@@ -1,5 +1,5 @@
 import pkg from "@aws-sdk/client-ecs";
-import { awsConfig } from "./aws-config.js";
+import { awsConfig } from "../config/aws-config.js";
 
 const {
   ECSClient,

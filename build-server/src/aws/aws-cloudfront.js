@@ -1,6 +1,6 @@
 import pkg from "@aws-sdk/client-cloudfront";
 const { CreateDistributionCommand } = pkg;
-import { cloudfrontClient } from "./aws-config.js";
+import { cloudfrontClient } from "../config/aws-config.js";
 
 export async function createCloudFrontDistribution(props) {
   const { 

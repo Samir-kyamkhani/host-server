@@ -1,12 +1,11 @@
 {
   "name": "build-server",
   "version": "1.0.0",
-  "main": "src/script.js",
+  "main": "src/main.js",
   "type": "module",
   "scripts": {
-    "dev": "node src/script.js",
-    "start": "node src/script.js",
-    "deploy": "./deploy.sh"
+    "dev": "node src/main.js",
+    "start": "node src/main.js"
   },
   "author": "",
   "license": "ISC",

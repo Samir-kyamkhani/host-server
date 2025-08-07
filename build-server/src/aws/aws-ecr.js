@@ -1,6 +1,6 @@
 import pkg from "@aws-sdk/client-ecr";
 const { CreateRepositoryCommand, GetAuthorizationTokenCommand } = pkg;
-import { ecrClient } from "./aws-config.js";
+import { ecrClient } from "../config/aws-config.js";
 import { runCommand } from "../utils/utils.js";
 
 export async function createECRRepository(props) {

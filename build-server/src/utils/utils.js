@@ -5,9 +5,9 @@ import { exec } from "child_process";
 
 export async function publishLog(props) {
   const { message, deploymentId, projectId, apiBaseUrl } = props;
-  
+
   console.log(`[${new Date().toISOString()}] ${message}`);
-  
+
   if (apiBaseUrl) {
     try {
       await axios.post(`${apiBaseUrl}/logs`, {
@@ -22,29 +22,27 @@ export async function publishLog(props) {
   }
 }
 
-
-
 export function readProjectConfig(props) {
   const { name, gitUrl, framework, db, envVars, gitBranch } = props;
-  
+
   // Validate required fields
   if (!gitUrl) {
     throw new Error("gitUrl is required for deployment");
   }
-  
+
   if (!name) {
     throw new Error("name is required for deployment");
   }
-  
+
   const environment = {};
   if (envVars && Array.isArray(envVars)) {
-    envVars.forEach(envVar => {
+    envVars.forEach((envVar) => {
       if (envVar.key && envVar.value !== undefined) {
         environment[envVar.key] = envVar.value;
       }
     });
   }
-  
+
   // Normalize framework names
   let normalizedFramework = framework;
   if (framework === "node") {
@@ -52,16 +50,25 @@ export function readProjectConfig(props) {
   } else if (framework === "next") {
     normalizedFramework = "nextjs";
   }
-  
+
   // Determine if framework needs database
-  const needsDatabase = normalizedFramework === "laravel" || (normalizedFramework && db && db !== null && db !== undefined);
-  
+  const needsDatabase =
+    normalizedFramework === "laravel" ||
+    (normalizedFramework && db && db !== null && db !== undefined);
+
   // Determine if framework uses Prisma
-  const usesPrisma = normalizedFramework && db && db !== null && db !== undefined && ["nextjs", "nodejs"].includes(normalizedFramework);
-  
+  const usesPrisma =
+    normalizedFramework &&
+    db &&
+    db !== null &&
+    db !== undefined &&
+    ["nextjs", "nodejs"].includes(normalizedFramework);
+
   // Determine deployment type
-  const deploymentType = ["vite", "static"].includes(normalizedFramework) ? "s3" : "ecs";
-  
+  const deploymentType = ["vite", "static"].includes(normalizedFramework)
+    ? "s3"
+    : "ecs";
+
   return {
     name: name,
     gitUrl,
@@ -85,7 +92,7 @@ export function generateDeploymentConfig(props) {
     subnetIds = process.env.SUBNET_IDS?.split(","),
     securityGroupIds = process.env.SECURITY_GROUP_IDS?.split(","),
   } = props;
-  
+
   return {
     projectId,
     deploymentId,
@@ -108,14 +115,15 @@ export async function updateDeploymentStatus(props) {
     database,
     error,
   } = props;
-  
+
   if (!apiBaseUrl) return;
-  
+
   try {
-    const endpoint = status === "failed" 
-      ? `${apiBaseUrl}/deployments/${deploymentId}/failed`
-      : `${apiBaseUrl}/deployments/${deploymentId}/complete`;
-    
+    const endpoint =
+      status === "failed"
+        ? `${apiBaseUrl}/deployments/${deploymentId}/failed`
+        : `${apiBaseUrl}/deployments/${deploymentId}/complete`;
+
     const payload = {
       status,
       projectId,
@@ -124,7 +132,7 @@ export async function updateDeploymentStatus(props) {
       ...(database && { database }),
       ...(error && { error }),
     };
-    
+
     await axios.post(endpoint, payload);
   } catch (updateError) {
     console.error("Failed to update deployment status:", updateError.message);
@@ -133,11 +141,11 @@ export async function updateDeploymentStatus(props) {
 
 export function runCommand(props) {
   const { command, cwd, publishLog, env } = props;
-  
+
   return new Promise((resolve, reject) => {
-    const proc = exec(command, { 
+    const proc = exec(command, {
       cwd,
-      env: env ? { ...process.env, ...env } : process.env
+      env: env ? { ...process.env, ...env } : process.env,
     });
 
     proc.stdout.on("data", async (data) => {
@@ -155,4 +163,4 @@ export function runCommand(props) {
       reject(msg);
     });
   });
-} 
+}

@@ -7,6 +7,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y \
     curl \
     git \
+    jq \
     dos2unix \
     apt-transport-https \
     ca-certificates \
@@ -31,22 +32,20 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
     ./aws/install && \
     rm -rf awscliv2.zip aws
 
-# Reset DEBIAN_FRONTEND (optional, good hygiene)
 ENV DEBIAN_FRONTEND=dialog
 
 # Set working directory
 WORKDIR /home/app
 
 # Copy application files
-COPY main.sh deploy.sh package*.json ./
+COPY main.sh package*.json ./
 COPY src/ ./src/
 
 # Fix line endings and set permissions
-RUN dos2unix main.sh deploy.sh && \
-    chmod +x main.sh deploy.sh
+RUN dos2unix main.sh && \
+    chmod +x main.sh
 
 # Install Node.js dependencies
 RUN npm install
 
-# Set entrypoint to run build server
 ENTRYPOINT ["/home/app/main.sh"]

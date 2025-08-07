@@ -7,7 +7,7 @@ const {
   PutPublicAccessBlockCommand,
   GetPublicAccessBlockCommand
 } = pkg;
-import { s3Client } from "./aws-config.js";
+import { s3Client } from "../config/aws-config.js";
 import fs from "fs";
 import path from "path";
 
