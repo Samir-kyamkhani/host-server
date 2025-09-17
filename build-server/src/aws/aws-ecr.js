@@ -90,17 +90,13 @@ export async function buildAndPushDockerImage({
   await publishLog(`🐳 Building Docker image for ${framework}...`);
 
   try {
-    // Create ECR repository
     await createECRRepository({ repositoryName, publishLog });
 
-    // Get ECR login token
     const { token, endpoint } = await getECRLoginToken({ publishLog });
 
-    // Get the base image for the framework
     const baseImage = await getBaseImageForFramework(projectPath);
     await publishLog(`📦 Using base image: ${baseImage}`);
 
-    // Create Dockerfile
     const dockerfileContent = `FROM ${baseImage}
 WORKDIR /app
 COPY . .
@@ -110,7 +106,6 @@ CMD ["npm", "start"]`;
 
     await fs.writeFile(path.join(projectPath, "Dockerfile"), dockerfileContent);
 
-    // Login to ECR
     await publishLog(`🔐 Logging into ECR...`);
     await runCommand({
       command: `aws ecr get-login-password --region ${region} | docker login --username AWS --password-stdin ${endpoint}`,
@@ -118,7 +113,6 @@ CMD ["npm", "start"]`;
       publishLog,
     });
 
-    // Build and push image
     try {
       await publishLog(`🏗️ Building Docker image...`);
       await runCommand({
@@ -155,15 +149,12 @@ async function getBaseImageForFramework(projectPath) {
     const pkgData = await fs.readFile(pkgPath, "utf-8");
     const pkgJson = JSON.parse(pkgData);
 
-    // Check for engines.node first
     if (pkgJson.engines?.node) {
       const versionSpecifier = pkgJson.engines.node;
-
       const versionMatch = versionSpecifier.match(/(\d+)(?:\.\d+)?(?:\.\d+)?/);
 
       if (versionMatch) {
         const majorVersion = versionMatch[1];
-
         if (/^\d+$/.test(majorVersion)) {
           const ltsVersion =
             Number(majorVersion) % 2 === 0

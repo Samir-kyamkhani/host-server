@@ -113,94 +113,6 @@ export class FrameworkHandler {
     return true;
   }
 
-  async handleLaravel() {
-    await this.publishLog("🚀 Setting up Laravel Fullstack deployment...");
-
-    await this.publishLog("📦 Installing Composer dependencies...");
-    await runCommand({
-      command: "composer install --no-dev --optimize-autoloader",
-      cwd: this.projectPath,
-      publishLog: this.publishLog,
-    });
-
-    const envPath = path.join(this.projectPath, ".env");
-    const envExamplePath = path.join(this.projectPath, ".env.example");
-
-    if (!fs.existsSync(envPath) && fs.existsSync(envExamplePath)) {
-      await this.publishLog("📝 Creating .env file from .env.example...");
-      fs.copyFileSync(envExamplePath, envPath);
-    }
-
-    await this.publishLog("🔑 Generating Laravel application key...");
-    await runCommand({
-      command: "php artisan key:generate",
-      cwd: this.projectPath,
-      publishLog: this.publishLog,
-    });
-
-    if (this.database) {
-      await this.publishLog("🗄️ Running Laravel database migrations...");
-      await runCommand({
-        command: "php artisan migrate --force",
-        cwd: this.projectPath,
-        publishLog: this.publishLog,
-      });
-    }
-
-    await this.publishLog("⚡ Optimizing Laravel for production...");
-    await runCommand({
-      command:
-        "php artisan config:cache && php artisan route:cache && php artisan view:cache",
-      cwd: this.projectPath,
-      publishLog: this.publishLog,
-    });
-
-    return {
-      type: "laravel",
-      port: 5000,
-      startCommand: "php artisan serve --host=0.0.0.0 --port=5000",
-      needsDatabase: true,
-      buildOutput: this.projectPath,
-    };
-  }
-
-  async handleNextJS() {
-    await this.publishLog("🚀 Setting up Next.js Fullstack deployment...");
-
-    await this.publishLog("📦 Installing npm dependencies...");
-    await runCommand({
-      command: "npm install",
-      cwd: this.projectPath,
-      publishLog: this.publishLog,
-    });
-
-    const envPath = path.join(this.projectPath, ".env.local");
-    if (!fs.existsSync(envPath)) {
-      fs.writeFileSync(envPath, "# Environment variables for Next.js\n");
-    }
-
-    if (this.database && this.usesPrisma()) {
-      await this.handlePrismaSetup();
-    }
-
-    await this.publishLog("🔨 Building Next.js application...");
-    await runCommand({
-      command: "npm run build",
-      cwd: this.projectPath,
-      publishLog: this.publishLog,
-    });
-
-    const isPrismaApp = this.framework === "nextjs-prisma" || this.usesPrisma();
-
-    return {
-      type: isPrismaApp ? "nextjs-prisma" : "nextjs",
-      port: 5000,
-      startCommand: "npm start",
-      needsDatabase: !!this.database,
-      buildOutput: this.projectPath,
-    };
-  }
-
   async handleNodeJS() {
     await this.publishLog("🚀 Setting up Node.js REST API deployment...");
 
@@ -291,7 +203,7 @@ export class FrameworkHandler {
       buildOutput: distPath,
       isStatic: true,
     };
-  } 
+  }
 
   async handleStatic() {
     await this.publishLog("🚀 Setting up Static Site deployment...");
@@ -352,11 +264,6 @@ export class FrameworkHandler {
     await this.publishLog(`🔧 Processing framework: ${this.framework}`);
 
     switch (this.framework) {
-      case "laravel":
-        return await this.handleLaravel();
-      case "nextjs":
-      case "nextjs-prisma":
-        return await this.handleNextJS();
       case "nodejs":
       case "nodejs-prisma":
         return await this.handleNodeJS();
@@ -380,8 +287,6 @@ export async function setupEnvironment(
   await publishLog("🔧 Setting up environment configuration...");
 
   const envFiles = {
-    laravel: ".env",
-    nextjs: ".env.local",
     nodejs: ".env",
     vite: ".env",
     static: ".env",
